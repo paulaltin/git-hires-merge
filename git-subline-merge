@@ -26,10 +26,10 @@ import os, sys, tempfile
 from subprocess import call
 
 
+
 ###############
 ### HELPERS ###
 ###############
-
 
 # for colored output in terminal
 class color:
@@ -41,6 +41,7 @@ class color:
     PURPLE = '\033[95m'
     CYAN = '\033[96m'
     END = '\033[0m'
+
 
 # get number of lines in a file, either from a name or a file handle
 # if given a handle, ensure position is reset to its original value
@@ -82,7 +83,7 @@ def find_nth_conflicted_hunk(file, n):
                 stop = i + 1
                 break
     if start == -1 or stop == -1:
-        raise IndexError('%dth hunk not found!' % n)
+        raise IndexError('Hunk %d hunk not found!' % n)
     return (start, stop)
 
 
@@ -126,6 +127,98 @@ def ask_for_input(msg, allowed=None):
 ###############
 
 
+def process_hunk(hunk, index, resolved, num_conflicts):
+
+    first_run = True
+    fixed = abort = False
+
+    # get number of lines in current, base and other hunks
+    sizes = [file_len(f) for f in hunk]
+
+    # ask user for action to take
+    while True:
+
+        if first_run:
+            print ''
+            action = 'v'
+            first_run = False
+        else:
+            print color.BOLD + color.BLUE + '\nConflicted hunk %d of %d (spans %d/%d/%d lines) in %s...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.END
+            print color.BOLD + '   v - view entire hunk' + color.END
+            print color.BOLD + '   x - view hunk in context' + color.END
+            print color.BOLD + '   c - view current version' + color.END
+            print color.BOLD + '   b - view base version' + color.END
+            print color.BOLD + '   o - view other version' + color.END
+            print color.BOLD + '   s - attempt sub-line merge' + color.END
+            print color.BOLD + '   m - resolve manually' + color.END
+            print color.BOLD + '   k - skip this hunk' + color.END
+            print color.BOLD + '   a - abort merge' + color.END
+            action = ask_for_input('Resolve this hunk', ['v','x','c','b','o','s','m','k','a'])
+            print ''
+
+        # actions
+        for f in hunk: f.seek(0)
+        if action == 'x':
+            start, stop = find_nth_conflicted_hunk(current, index-resolved)
+            with open(current, 'r') as c:
+                for i,l in enumerate(c):
+                    if i in range(max(0, start-10), start):
+                        print l.rstrip('\n')
+                    elif i >= start:
+                        break
+        if action in ['v','x','c']:
+            print color.RED + marker_start + ' Current version is:\n' + color.END + hunk[0].read().rstrip('\n')
+        if action in ['v','x','b']:
+            print color.RED + marker_base + ' Base version was:\n' + color.END + hunk[1].read().rstrip('\n')
+        if action in ['v','x','o']:
+            print color.RED + marker_other + ' Other version is:\n' + color.END + hunk[2].read().rstrip('\n')
+        if action in ['v','x','c','b','o']:
+            print color.RED + marker_end + color.END
+        if action == 'x':
+            length = file_len(current)
+            with open(current, 'r') as c:
+                for i,l in enumerate(c):
+                    if i in range(stop, min(stop+10, length)):
+                        print l.rstrip('\n')
+                    elif i >= stop:
+                        break
+        elif action == 's':
+            result = subline_merge_hunk(hunk)
+            if result is not None:
+                print '\n' + color.RED + marker_start + ' Sub-line merge yields:' + color.END
+                if len(result): print '\n'.join([x.rstrip('\n') for x in result])
+                print color.RED + marker_end + color.END + '\n'
+                accept = ask_for_input('Accept sub-line merge', ['y','n'])
+                success = True if accept == 'y' else False
+                if (success):
+                    replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
+                    fixed = True
+                    break
+            else:
+                print color.BOLD + color.RED + 'Sub-line merge failed, hunk too large or has overlapping changes' + color.END
+        elif action == 'm':
+            result = manual_merge_hunk(hunk)
+            if result is not None:
+                print '\n' + color.RED + marker_start + ' Manual resolution is:' + color.END
+                if len(result): print '\n'.join([x.rstrip('\n') for x in result])
+                print color.RED + marker_end + color.END + '\n'
+                accept = ask_for_input('Accept manual resolution', ['y','n'])
+                success = True if accept == 'y' else False
+                if (success):
+                    replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
+                    fixed = True
+                    break
+            else:
+                print color.BOLD + color.YELLOW + 'User cancelled manual resolve' + color.END
+        elif action == 'k':
+            break
+        elif action == 'a':
+            abort = True
+            break
+
+    return fixed, abort
+
+
 # attempt to do sub-line merging of a conflicted hunk
 def subline_merge_hunk(hunk):
 
@@ -134,8 +227,8 @@ def subline_merge_hunk(hunk):
 
     result = None
 
-    # only attempt sub-line merge if hunks are small and same size
-    if (sizes[0] == sizes[1] == sizes[2] and sizes[0] < 10):
+    # only attempt sub-line merge if hunks are small
+    if all([s < 10 for s in sizes]):
 
         lines = []
         success = True
@@ -169,13 +262,14 @@ def subline_merge_hunk(hunk):
 # open an editor for manual merging of a conflicted hunk
 def manual_merge_hunk(hunk):
 
-    # show instructions and wait for confirmation
-    print 'The conflicted hunk will now open in an editor for manual resolution.'
-    print 'Be sure to remove all conflict markers before saving. The file contents'
-    print '  will be inserted verbatim into the conflicted file.'
-    print 'To cancel manual resolve, force the editor to close with an error code.'
-    print '  (e.g. in vim, type :cq to cancel editing)'
-    ask_for_input('Press <Enter> to continue...')
+    # not necessary since we ask for confirmation afterwards anyway
+    # # show instructions and wait for confirmation
+    # print 'The conflicted hunk will now open in an editor for manual resolution.'
+    # print 'Be sure to remove all conflict markers before saving. The file contents'
+    # print '  will be inserted verbatim into the conflicted file.'
+    # print 'To cancel manual resolve, force the editor to close with an error code.'
+    # print '  (e.g. in vim, type :cq to cancel editing)'
+    # ask_for_input('Press <Enter> to continue...')
 
     # prepare temp file for editing
     f = tempfile.NamedTemporaryFile(delete=False)
@@ -226,15 +320,21 @@ base, current, other, marker_len, filename = sys.argv[1:]
 marker_len = int(marker_len)
 marker_start = '<' * marker_len
 marker_base = '|' * marker_len
-marker_other= '=' * marker_len
+marker_other = '=' * marker_len
 marker_end = '>' * marker_len
 
 # run git merge on the files using diff3 (result is written to 'current')
 # the number of conflicts is encoded in the exit status of the git-merge-file command
-# there should always be conflicts, otherwise we wouldn't have been called
 status = os.system('git merge-file --diff3 --marker-size=%d -L "Current version" -L "Base version" -L "Other version" %s %s %s' % (marker_len, current, base, other))
 num_conflicts = os.WEXITSTATUS(status)
-assert num_conflicts > 0
+
+# sometimes (e.g. during interactive rebase) this script is called even though
+# there are no conflicts - in that case just exit successfully here
+if num_conflicts == 0:
+    sys.exit(0)
+
+# welcome message
+print color.BOLD + color.RED + '\ngit-smart-merge v1.0\n' + color.END
 
 # make temporary files
 # one is a copy of the conflicted 'current', to iterate with
@@ -246,115 +346,34 @@ tmp.seek(0)
 hunk = [ tempfile.TemporaryFile(mode='a+'), tempfile.TemporaryFile(mode='a+'), tempfile.TemporaryFile(mode='a+') ]
 
 # process file line by line
-abort = False
 resolved = zone = index = 0
 
 for line in tmp:
 
-    # conflict zones
+    # beginning of conflict zone
     if line.startswith(marker_start):
         zone = 1
         for f in hunk: f.truncate(0)
-    elif line.startswith(marker_base): zone = 2
-    elif line.startswith(marker_other): zone = 3
+
+    # base version of conflict
+    elif line.startswith(marker_base):
+        zone = 2
+
+    # other version of conflict
+    elif line.startswith(marker_other):
+        zone = 3
 
     # end of conflict zone
     elif line.startswith(marker_end):
-
-        index += 1
-
-        # get number of lines in current, base and other hunks
-        sizes = [file_len(f) for f in hunk]
-
-        first_run = True
-
-        # ask user for action to take
-        while True:
-
-            if first_run:
-                print ''
-                action = 'v'
-                first_run = False
-            else:
-                print color.BOLD + color.BLUE + '\nConflicted hunk %d of %d (spans %d/%d/%d lines) in %s...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.END
-                print color.BOLD + '   v - view entire hunk' + color.END
-                print color.BOLD + '   x - view hunk in context' + color.END
-                print color.BOLD + '   c - view current version' + color.END
-                print color.BOLD + '   b - view base version' + color.END
-                print color.BOLD + '   o - view other version' + color.END
-                print color.BOLD + '   s - attempt sub-line merge' + color.END
-                print color.BOLD + '   m - resolve manually' + color.END
-                print color.BOLD + '   k - skip this hunk' + color.END
-                print color.BOLD + '   a - abort merge' + color.END
-                action = ask_for_input('Resolve this hunk', ['v','x','c','b','o','s','m','k','a'])
-                print ''
-
-            # actions
-            for f in hunk: f.seek(0)
-            if action == 'x':
-                start, stop = find_nth_conflicted_hunk(current, index-resolved)
-                with open(current, 'r') as c:
-                    for i,l in enumerate(c):
-                        if i in range(max(0, start-10), start):
-                            print l.rstrip('\n')
-                        elif i >= start:
-                            break
-            if action in ['v','x','c']:
-                print color.RED + marker_start + ' Current version is:\n' + color.END + hunk[0].read().rstrip('\n')
-            if action in ['v','x','b']:
-                print color.RED + marker_base + ' Base version was:\n' + color.END + hunk[1].read().rstrip('\n')
-            if action in ['v','x','o']:
-                print color.RED + marker_other + ' Other version is:\n' + color.END + hunk[2].read().rstrip('\n')
-            if action in ['v','x','c','b','o']:
-                print color.RED + marker_end + color.END
-            if action == 'x':
-                length = file_len(current)
-                with open(current, 'r') as c:
-                    for i,l in enumerate(c):
-                        if i in range(stop, min(stop+10, length)):
-                            print l.rstrip('\n')
-                        elif i >= stop:
-                            break
-            elif action == 's':
-                result = subline_merge_hunk(hunk)
-                if result is not None:
-                    print '\n' + color.RED + marker_start + ' Sub-line merge yields:' + color.END
-                    if len(result): print '\n'.join([x.rstrip('\n') for x in result])
-                    print color.RED + marker_end + color.END + '\n'
-                    accept = ask_for_input('Accept sub-line merge', ['y','n'])
-                    success = True if accept == 'y' else False
-                    if (success):
-                        replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
-                        resolved += 1
-                        break
-                else:
-                    print color.BOLD + color.RED + 'Sub-line merge failed, hunk not self-consistent or has overlapping changes' + color.END
-            elif action == 'm':
-                result = manual_merge_hunk(hunk)
-                if result is not None:
-                    print '\n' + color.RED + marker_start + ' Manual resolution is:' + color.END
-                    if len(result): print '\n'.join([x.rstrip('\n') for x in result])
-                    print color.RED + marker_end + color.END + '\n'
-                    accept = ask_for_input('Accept manual resolution', ['y','n'])
-                    success = True if accept == 'y' else False
-                    if (success):
-                        replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
-                        resolved += 1
-                        break
-                else:
-                    print color.BOLD + color.YELLOW + 'User cancelled manual resolve' + color.END
-            elif action == 'k':
-                break
-            elif action == 'a':
-                abort = True
-                break
         zone = 0
+        index += 1
+        fixed, abort = process_hunk(hunk, index, resolved, num_conflicts)
+        if fixed: resolved += 1
+        elif abort: break
 
-    # append line to conflict zone file
+    # append line to appropriate hunk zone
     elif zone:
         hunk[zone-1].write(line)
-
-    if abort: break
 
 
 # close all temp files (will be automatically deleted)
