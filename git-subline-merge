@@ -25,6 +25,11 @@
 import os, sys, re, tempfile
 from subprocess import call
 from shutil import copyfile
+
+# Python 2 compatibility
+from builtins import input
+
+# syntax highlighting
 from pygments import highlight
 from pygments.styles import get_style_by_name
 from pygments.lexers import get_lexer_for_filename
@@ -120,12 +125,12 @@ def ask_for_input(msg, allowed=None):
     if allowed is not None:
         msg = color.bold + color.info + msg + ' (' + '/'.join(allowed) + ')? ' + color.end
         while True:
-            r = raw_input(msg).strip().lower()
+            r = input(msg).strip().lower()
             if r in [s.strip().lower() for s in allowed]:
                 break
     else:
         msg = color.bold + color.info + msg + color.end
-        r = raw_input(msg)
+        r = input(msg)
 
     sys.stdin = previous
     return r
@@ -156,11 +161,11 @@ def classify_diff_lines(file1, file2):
         if h[0] == 'A':
             a = h[1:].split(',')[1]
             start,length = [int(x) for x in a.split('+')]
-            added += range(start, start+length)
+            added += list(range(start, start+length))
         elif h[0] == 'D':
             d = h[1:].split(',')[0]
             start,length = [int(x) for x in d.split('+')]
-            deleted += range(start, start+length)
+            deleted += list(range(start, start+length))
         elif h[0] == 'C':
             c = h[1:].split(',')
             start,stop = [int(x) for x in c[0].split('+')]
@@ -173,13 +178,13 @@ def classify_diff_lines(file1, file2):
 
 # print diff lines with coloring
 def print_added_line(ln):
-    print '+ ' + color.added + ln + color.end
+    print('+ ' + color.added + ln + color.end)
 
 def print_deleted_line(ln):
-    print '- ' + color.deleted + ln + color.end
+    print('- ' + color.deleted + ln + color.end)
 
 def print_unchanged_line(ln):
-    print '  ' + ln
+    print('  ' + ln)
 
 def print_changed_hunk(h1, h2, which):
 
@@ -227,7 +232,7 @@ def print_changed_hunk(h1, h2, which):
                 sys.stdout.write(color.deleted)
             sys.stdout.write(highlight(w, lexer, formatter).rstrip('\n'))
             sys.stdout.write(color.end)
-        print ''
+        print('')
 
     elif which == 'new':
         sys.stdout.write('* ')
@@ -238,7 +243,7 @@ def print_changed_hunk(h1, h2, which):
                 sys.stdout.write(color.added)
             sys.stdout.write(highlight(w, lexer, formatter).rstrip('\n'))
             sys.stdout.write(color.end)
-        print ''
+        print('')
 
     tmpA.close()
     tmpB.close()
@@ -299,27 +304,27 @@ def process_hunk(hunk, index, resolved, num_conflicts):
     sizes = [file_len(f) for f in hunk]
 
     # only process small hunks
-    if all([s <= 16 for s in sizes]):
+    if all([s <= 32 for s in sizes]):
 
-        print color.bold + color.highlight + '\nConflicted hunk %d of %d (spans %d/%d/%d lines) in %s...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.end
+        print(color.bold + color.highlight + '\nConflicted hunk %d of %d (spans %d/%d/%d lines) in %s...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.end)
 
         # ask user for action to take
         while True:
 
             if first_run:
-                print ''
+                print('')
                 action = 'v'
                 first_run = False
             else:
-                print ''
-                print color.bold + '   v - view entire hunk' + color.end
-                print color.bold + '   c - view hunk in context' + color.end
-                print color.bold + '   s - attempt sub-line merge' + color.end
-                print color.bold + '   m - resolve manually' + color.end
-                print color.bold + '   k - skip this hunk' + color.end
-                print color.bold + '   q - skip all hunks in this file' + color.end
+                print('')
+                print(color.bold + '   v - view entire hunk' + color.end)
+                print(color.bold + '   c - view hunk in context' + color.end)
+                print(color.bold + '   s - attempt sub-line merge' + color.end)
+                print(color.bold + '   m - resolve manually' + color.end)
+                print(color.bold + '   k - skip this hunk' + color.end)
+                print(color.bold + '   q - skip all hunks in this file' + color.end)
                 action = ask_for_input('Resolve this hunk', ['v','c','s','m','k','q'])
-                print ''
+                print('')
 
             # actions
             for f in hunk: f.seek(0)
@@ -328,33 +333,33 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 with open(current, 'r') as c:
                     for i,l in enumerate(c):
                         if i in range(max(0, start-10), start):
-                            print highlight(l, lexer, formatter).rstrip('\n')
+                            print(highlight(l, lexer, formatter).rstrip('\n'))
                         elif i >= start:
                             break
             if action in ['v','c']:
-                print color.info + marker_start + ' Current version' + color.end
+                print(color.info + marker_start + ' Current version' + color.end)
                 show_diff(hunk[1], hunk[0], 'new')
-                print color.info + marker_base + ' Base version' + color.end
+                print(color.info + marker_base + ' Base version' + color.end)
                 show_diff(hunk[1], hunk[0], 'old')
-                print color.info + marker_other + color.end
+                print(color.info + marker_other + color.end)
                 show_diff(hunk[1], hunk[2], 'old')
-                print color.info + marker_base + ' Base version' + color.end
+                print(color.info + marker_base + ' Base version' + color.end)
                 show_diff(hunk[1], hunk[2], 'new')
-                print color.info + marker_end + ' Other version' + color.end
+                print(color.info + marker_end + ' Other version' + color.end)
             if action == 'c':
                 length = file_len(current)
                 with open(current, 'r') as c:
                     for i,l in enumerate(c):
                         if i in range(stop, min(stop+10, length)):
-                            print highlight(l, lexer, formatter).rstrip('\n')
+                            print(highlight(l, lexer, formatter).rstrip('\n'))
                         elif i >= stop:
                             break
             elif action == 's':
                 result = subline_merge_hunk(hunk)
                 if result is not None:
-                    print color.info + marker_start + ' Sub-line merge yields:' + color.end
-                    if len(result): print highlight('\n'.join([x.rstrip('\n') for x in result]), lexer, formatter).rstrip('\n')
-                    print color.info + marker_end + color.end + '\n'
+                    print(color.info + marker_start + ' Sub-line merge yields:' + color.end)
+                    if len(result): print(highlight('\n'.join([x.rstrip('\n') for x in result]), lexer, formatter).rstrip('\n'))
+                    print(color.info + marker_end + color.end + '\n')
                     accept = ask_for_input('Accept sub-line merge', ['y','n'])
                     success = True if accept == 'y' else False
                     if (success):
@@ -362,13 +367,13 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                         fixed = True
                         break
                 else:
-                    print color.bold + color.error + 'Sub-line merge failed, hunk has overlapping changes' + color.end
+                    print(color.bold + color.error + 'Sub-line merge failed, hunk has overlapping changes' + color.end)
             elif action == 'm':
                 result = manual_merge_hunk(hunk)
                 if result is not None:
-                    print color.info + marker_start + ' Manual resolution is:' + color.end
-                    if len(result): print highlight('\n'.join([x.rstrip('\n') for x in result]), lexer, formatter).rstrip('\n')
-                    print color.info + marker_end + color.end + '\n'
+                    print(color.info + marker_start + ' Manual resolution is:' + color.end)
+                    if len(result): print(highlight('\n'.join([x.rstrip('\n') for x in result]), lexer, formatter).rstrip('\n'))
+                    print(color.info + marker_end + color.end + '\n')
                     accept = ask_for_input('Accept manual resolution', ['y','n'])
                     success = True if accept == 'y' else False
                     if (success):
@@ -376,7 +381,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                         fixed = True
                         break
                 else:
-                    print color.bold + color.warning + 'User cancelled manual resolve' + color.end
+                    print(color.bold + color.warning + 'User cancelled manual resolve' + color.end)
             elif action == 'k':
                 break
             elif action == 'q':
@@ -384,7 +389,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 break
 
     else:
-        print color.bold + color.info + '\nSkipping hunk %d of %d (spans %d/%d/%d lines) in %s, too large...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.end
+        print(color.bold + color.info + '\nSkipping hunk %d of %d (spans %d/%d/%d lines) in %s, too large...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.end)
 
     return fixed, abort
 
@@ -490,7 +495,7 @@ lexer = get_lexer_for_filename(filename)
 formatter = Terminal256Formatter(style=get_style_by_name('vim'))
 
 # welcome message
-print color.bold + color.red + '\ngit-subline-merge v1.0\n' + color.end
+print(color.bold + color.red + '\ngit-subline-merge v1.0\n' + color.end)
 
 # make temporary files
 # one is a copy of the conflicted 'current', to iterate with
@@ -538,7 +543,7 @@ for h in hunk: h.close()
 
 # print resolution
 col = color.success if resolved == num_conflicts else color.warning if resolved > 0 else color.error
-print col + color.bold + '\nResolved %d of %d conflicts in %s\n' % (resolved, num_conflicts, filename) + color.end
+print(col + color.bold + '\nResolved %d of %d conflicts in %s\n' % (resolved, num_conflicts, filename) + color.end)
 
 # only exit with success if all conflicts were resolved
 sys.exit(0 if resolved == num_conflicts else 1)
