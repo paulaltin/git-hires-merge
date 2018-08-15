@@ -203,10 +203,10 @@ def print_changed_hunk(h1, h2, which):
     lcB.pop(0)
 
     # write split lines to temp files
-    tmpA = tempfile.NamedTemporaryFile()
+    tmpA = tempfile.NamedTemporaryFile(mode='w+')
     tmpA.write('\n'.join(splA))
     tmpA.flush()
-    tmpB = tempfile.NamedTemporaryFile()
+    tmpB = tempfile.NamedTemporaryFile(mode='w+')
     tmpB.write('\n'.join(splB))
     tmpB.flush()
 
@@ -403,7 +403,7 @@ def subline_merge_hunk(hunk):
     # separate each character in a string by a newline character
     for i in range(3):
         h = hunk[i].read()
-        fs[i] = tempfile.NamedTemporaryFile()
+        fs[i] = tempfile.NamedTemporaryFile(mode='w+')
         fs[i].write('\n'.join(h[i:i+1] for i in range(len(h))))
         fs[i].flush()
 
@@ -427,7 +427,7 @@ def subline_merge_hunk(hunk):
 def manual_merge_hunk(hunk):
 
     # prepare temp file for editing
-    f = tempfile.NamedTemporaryFile(delete=False)
+    f = tempfile.NamedTemporaryFile(mode='w+', delete=False)
     f.write(marker_start + ' Current version is:\n')
     f.write(hunk[0].read())
     f.write(marker_base + ' Base version is:\n')
@@ -501,7 +501,7 @@ print(color.bold + color.red + '\ngit-subline-merge v1.0\n' + color.end)
 # one is a copy of the conflicted 'current', to iterate with
 # three are used to hold the different versions of each conflicted hunk
 # open with 'a' so we can append without worrying about newline characters
-tmp = tempfile.TemporaryFile()
+tmp = tempfile.TemporaryFile(mode='w+')
 with open(current, 'r') as c: tmp.write(c.read())
 tmp.seek(0)
 hunk = [ tempfile.NamedTemporaryFile(mode='a+'), tempfile.NamedTemporaryFile(mode='a+'), tempfile.NamedTemporaryFile(mode='a+') ]
