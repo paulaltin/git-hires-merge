@@ -26,6 +26,9 @@ import os, sys, re, tempfile
 from subprocess import call
 from shutil import copyfile
 
+if os.name == 'nt':
+    from colorama import init
+
 # Python 2 compatibility
 from builtins import input
 
@@ -117,10 +120,10 @@ def replace_nth_conflicted_hunk_with_lines(file, n, lines):
 # prompt user for input, repeating until one of the allowed responses is given
 def ask_for_input(msg, allowed=None):
 
-    # when run from git, stdin isn't connected to the terminal
+    # when run from git on *nix, stdin isn't connected to the terminal
     # reconfigure stdin to prompt, then return it to its previous state
-    previous = sys.stdin
-    sys.stdin = open('/dev/tty')
+    if os.name != 'nt':
+        sys.stdin = open('/dev/tty')
 
     if allowed is not None:
         msg = color.bold + color.info + msg + ' (' + '/'.join(allowed) + ')? ' + color.end
@@ -132,8 +135,13 @@ def ask_for_input(msg, allowed=None):
         msg = color.bold + color.info + msg + color.end
         r = input(msg)
 
-    sys.stdin = previous
+    sys.stdin = sys.__stdin__
     return r
+
+# get exit status from a call to os.system
+# on Windows, os.WEXITSTATUS() doesn't work and os.system() returns the status directly
+def get_exit_status(exit_code):
+    return exit_code if (os.name == 'nt') else os.WEXITSTATUS(exit_code)
 
 
 
@@ -146,11 +154,14 @@ def classify_diff_lines(file1, file2):
 
     # for added and deleted groups, get the (zero-indexed) number of the first line and the length of the group
     # for changed groups, get the (zero-indexed) numbers of the first and one past the last line
-    oldformat = ' --old-group-format="D%de+%dn,%dE+%dN\n" '
-    newformat = ' --new-group-format="A%de+%dn,%dE+%dN\n" '
-    changedformat = ' --changed-group-format="C%de+%dl,%dE+%dL\n" '
+    # ideally we'd use \n as the delimiter, but these break the shell on Windows
+    delimiter = marker_start + "GIT_SUBLINE_MERGE_DELIMITER" + marker_end
+    oldformat = ' --old-group-format="D%de+%dn,%dE+%dN' + delimiter + '" '
+    newformat = ' --new-group-format="A%de+%dn,%dE+%dN' + delimiter + '" '
+    changedformat = ' --changed-group-format="C%de+%dl,%dE+%dL' + delimiter + '" '
     unchangedformat = ' --unchanged-group-format="" '
-    hunks = os.popen('diff' + oldformat + newformat + changedformat + unchangedformat + file1 + ' ' + file2).read().splitlines()
+    cmd = 'diff' + oldformat + newformat + changedformat + unchangedformat + file1 + ' ' + file2
+    hunks = [h for h in os.popen(cmd).read().split(delimiter) if len(h)]
 
     # extract indices from diff output
     # added and deleted are a list of line numbers
@@ -401,24 +412,26 @@ def subline_merge_hunk(hunk):
     fs = [None, None, None]
 
     # separate each character in a string by a newline character
+    # on Windows the temp file can't be open twice, so we have to close it before calling
+    #   git-merge-file and delete it manually later
     for i in range(3):
         h = hunk[i].read()
-        fs[i] = tempfile.NamedTemporaryFile(mode='w+')
+        fs[i] = tempfile.NamedTemporaryFile(mode='w+', delete=False)
         fs[i].write('\n'.join(h[i:i+1] for i in range(len(h))))
-        fs[i].flush()
+        fs[i].close()
 
     # attempt merge on separated text
     status = os.system('git merge-file %s %s %s' % (fs[0].name, fs[1].name, fs[2].name))
-    num_conflicts = os.WEXITSTATUS(status)
+    num_conflicts = get_exit_status(status)
 
     # if successful, take merge result after removing newlines
     # split into a list of lines
     if (num_conflicts == 0):
-        fs[0].seek(0)
-        h = fs[0].read()
+        with open(fs[0].name, 'r+') as f0:
+            h = f0.read()
         result = h[0::2].splitlines(True)
 
-    for f in fs: f.close()
+    for f in fs: os.unlink(f.name)
 
     return result
 
@@ -439,15 +452,20 @@ def manual_merge_hunk(hunk):
 
     # use default editor (or vi if there isn't one)
     editor = os.getenv('GIT_EDITOR', 'vi')
+    
+    # when run from git on *nix, stdin isn't connected to the terminal
+    # this causes some editors (e.g. vi) to behave strangely, so we set it explicitly
+    windows = (os.name == 'nt')
+    stdin_var = None if windows else open('/dev/tty')
+    use_shell = False if windows else True
 
     # known issue with vi on Mac OS X: can give nonzero exit status even when quit cleanly due to
     # errors in .vimrc, so check its normal exit code first.
     success_code = 0
     if editor == 'vi':
-        success_code = call(['vi -c "q" %s' % f.name], shell=True, stdin=open('/dev/tty'))
+        success_code = call(['vi -c "q" %s' % f.name], shell=use_shell, stdin=stdin_var)
 
-    # some editors (e.g. vi) behave strangely if stdin isn't the controlling terminal, so set it explicitly
-    status = call(['%s %s' % (editor, f.name)], shell=True, stdin=open('/dev/tty'))
+    status = call(['%s %s' % (editor, f.name)], shell=use_shell, stdin=stdin_var)
 
     # if editor returned without an error, return the saved lines
     result = None
@@ -473,6 +491,10 @@ def manual_merge_hunk(hunk):
 # the result should be left in the current version (argv[2])
 base, current, other, marker_len, filename = sys.argv[1:]
 
+# initialize colorama for colored terminal output on Windows
+if os.name == 'nt':
+    init()
+
 # conflict markers can have custom lengths
 marker_len = int(marker_len)
 marker_start = '<' * marker_len
@@ -483,7 +505,7 @@ marker_end = '>' * marker_len
 # run git merge on the files using diff3 (result is written to 'current')
 # the number of conflicts is encoded in the exit status of the git-merge-file command
 status = os.system('git merge-file --diff3 --marker-size=%d -L "Current version" -L "Base version" -L "Other version" %s %s %s' % (marker_len, current, base, other))
-num_conflicts = os.WEXITSTATUS(status)
+num_conflicts = get_exit_status(status)
 
 # sometimes (e.g. during interactive rebase) this script is called even though
 # there are no conflicts - in that case just exit successfully here
@@ -544,6 +566,10 @@ for h in hunk: h.close()
 # print resolution
 col = color.success if resolved == num_conflicts else color.warning if resolved > 0 else color.error
 print(col + color.bold + '\nResolved %d of %d conflicts in %s\n' % (resolved, num_conflicts, filename) + color.end)
+
+# de-initialize colorama
+if os.name == 'nt':
+    deinit()
 
 # only exit with success if all conflicts were resolved
 sys.exit(0 if resolved == num_conflicts else 1)
