@@ -9,7 +9,7 @@
 #
 # An interactive git merge driver which can resolve non-overlapping conflicts on individual or adjacent lines.
 #
-# To install, add these lines to your ~/.gitconfig:
+# To install, place this script somewhere on your path, add these lines to your ~/.gitconfig:
 #
 #     [merge "git-subline-merge"]
 #         name = An interactive merge driver for resolving sub-line conflicts
@@ -329,17 +329,20 @@ def process_hunk(hunk, index, resolved, num_conflicts):
             else:
                 print('')
                 print(color.bold + '   v - view entire hunk' + color.end)
-                print(color.bold + '   c - view hunk in context' + color.end)
+                print(color.bold + '   x - view hunk in context' + color.end)
                 print(color.bold + '   s - attempt sub-line merge' + color.end)
                 print(color.bold + '   m - resolve manually' + color.end)
+                print(color.bold + '   c - use current version' + color.end)
+                print(color.bold + '   b - use base version' + color.end)
+                print(color.bold + '   o - use other version' + color.end)
                 print(color.bold + '   k - skip this hunk' + color.end)
                 print(color.bold + '   q - skip all hunks in this file' + color.end)
-                action = ask_for_input('Resolve this hunk', ['v','c','s','m','k','q'])
+                action = ask_for_input('Resolve this hunk', ['v','x','s','m','c','b','o','k','q'])
                 print('')
 
             # actions
             for f in hunk: f.seek(0)
-            if action == 'c':
+            if action == 'x':
                 start, stop = find_nth_conflicted_hunk(current, index-resolved)
                 with open(current, 'r') as c:
                     for i,l in enumerate(c):
@@ -347,7 +350,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                             print(highlight(l, lexer, formatter).rstrip('\n'))
                         elif i >= start:
                             break
-            if action in ['v','c']:
+            if action in ['v','x']:
                 print(color.info + marker_start + ' Current version' + color.end)
                 show_diff(hunk[1], hunk[0], 'new')
                 print(color.info + marker_base + ' Base version' + color.end)
@@ -357,7 +360,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 print(color.info + marker_base + ' Base version' + color.end)
                 show_diff(hunk[1], hunk[2], 'new')
                 print(color.info + marker_end + ' Other version' + color.end)
-            if action == 'c':
+            if action == 'x':
                 length = file_len(current)
                 with open(current, 'r') as c:
                     for i,l in enumerate(c):
@@ -393,6 +396,21 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                         break
                 else:
                     print(color.bold + color.warning + 'User cancelled manual resolve' + color.end)
+            elif action in ['c','b','o']:
+                idx = ['c','b','o'].index(action)
+                result = hunk[idx].readlines()
+                branchname = ['Current','Base','Other'][idx]
+                print(color.info + marker_start + ' ' + branchname + ' version is:' + color.end)
+                if len(result): print(highlight('\n'.join([x.rstrip('\n') for x in result]), lexer, formatter).rstrip('\n'))
+                print(color.info + marker_end + color.end + '\n')
+                warn = ['the other branch', 'both branches', 'the current branch'][idx]
+                print(color.bold + color.warning + 'Warning: this will discard changes on ' + warn + '!' + color.end + '\n')
+                accept = ask_for_input('Accept', ['y','n'])
+                success = True if accept == 'y' else False
+                if (success):
+                    replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
+                    fixed = True
+                    break
             elif action == 'k':
                 break
             elif action == 'q':
