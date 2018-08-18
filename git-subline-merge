@@ -32,6 +32,11 @@ if os.name == 'nt':
 
 
 
+MAX_HUNK_SIZE = 16
+MAX_HUNK_SIZE_DIFF = 8
+
+
+
 ###############
 ### HELPERS ###
 ###############
@@ -391,7 +396,9 @@ def process_hunk(hunk, index, resolved, num_conflicts):
     sizes = [file_len(f) for f in hunk]
 
     # only process small hunks
-    if all([s <= 32 for s in sizes]):
+    max_size = int(os.getenv('GIT_SUBLINE_MERGE_MAX_HUNK_SIZE', MAX_HUNK_SIZE))
+    max_size_diff = int(os.getenv('GIT_SUBLINE_MERGE_MAX_HUNK_SIZE_DIFF', MAX_HUNK_SIZE_DIFF))
+    if all([s <= max_size for s in sizes]) and max(abs(sizes[0]-sizes[1]), abs(sizes[2]-sizes[1])) <= max_size_diff:
 
         print(color.highlight + '\nConflicted hunk %d of %d (spans %d/%d/%d lines) in %s...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.end)
 
