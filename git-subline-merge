@@ -299,7 +299,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
     sizes = [file_len(f) for f in hunk]
 
     # only process small hunks
-    if all([s < 10 for s in sizes]):
+    if all([s <= 16 for s in sizes]):
 
         print color.bold + color.highlight + '\nConflicted hunk %d of %d (spans %d/%d/%d lines) in %s...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.end
 
@@ -317,9 +317,8 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 print color.bold + '   s - attempt sub-line merge' + color.end
                 print color.bold + '   m - resolve manually' + color.end
                 print color.bold + '   k - skip this hunk' + color.end
-                print color.bold + '   f - skip all hunks in this file' + color.end
-                print color.bold + '   q - quit (skip all remaining files)' + color.end
-                action = ask_for_input('Resolve this hunk', ['v','c','s','m','k','f','q'])
+                print color.bold + '   q - skip all hunks in this file' + color.end
+                action = ask_for_input('Resolve this hunk', ['v','c','s','m','k','q'])
                 print ''
 
             # actions
@@ -380,14 +379,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                     print color.bold + color.warning + 'User cancelled manual resolve' + color.end
             elif action == 'k':
                 break
-            elif action == 'f':
-                abort = True
-                break
             elif action == 'q':
-                try:
-                    copyfile(os.path.join(REBASE_DIR, '0001'), os.path.join(TEMP_DIR, 'subline-merge-quit'))
-                except IOError:
-                    pass
                 abort = True
                 break
 
@@ -476,12 +468,6 @@ def manual_merge_hunk(hunk):
 # the result should be left in the current version (argv[2])
 base, current, other, marker_len, filename = sys.argv[1:]
 
-# get rebase directory, if there is one
-# we use this to store the quit file, so we know to skip all remaining files
-GIT_DIR = os.popen('git rev-parse --absolute-git-dir').read().splitlines()[0]
-REBASE_DIR = os.path.join(GIT_DIR, 'rebase-apply')
-TEMP_DIR = REBASE_DIR if os.path.isdir(REBASE_DIR) else tempfile.gettempdir()
-
 # conflict markers can have custom lengths
 marker_len = int(marker_len)
 marker_start = '<' * marker_len
@@ -493,14 +479,6 @@ marker_end = '>' * marker_len
 # the number of conflicts is encoded in the exit status of the git-merge-file command
 status = os.system('git merge-file --diff3 --marker-size=%d -L "Current version" -L "Base version" -L "Other version" %s %s %s' % (marker_len, current, base, other))
 num_conflicts = os.WEXITSTATUS(status)
-
-# exit if the user has already asked to quit on this commit
-# this needs to be after running git-merge-file to ensure the current file has the conflicts in it
-this_patch = os.popen('head -1 "%s" 2>/dev/null' % os.path.join(REBASE_DIR, '0001')).read()
-quit_patch = os.popen('head -1 "%s" 2>/dev/null' % os.path.join(TEMP_DIR, 'subline-merge-quit')).read()
-if quit_patch and this_patch == quit_patch:
-    print color.error + color.bold + 'Skipping file %s...\n' % filename + color.end
-    sys.exit(1)
 
 # sometimes (e.g. during interactive rebase) this script is called even though
 # there are no conflicts - in that case just exit successfully here
