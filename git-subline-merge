@@ -450,9 +450,13 @@ def manual_merge_hunk(hunk):
     f.write(marker_end + '\n')
     f.close()
 
-    # use default editor (or vi if there isn't one)
-    editor = os.getenv('GIT_EDITOR', 'vi')
-    
+    # imitate the process that Git uses to determine which editor to use
+    editor = os.getenv('GIT_EDITOR')
+    if editor is None: editor = os.popen('git config core.editor').read().rstrip('\n')
+    if editor is None: editor = os.getenv('VISUAL')
+    if editor is None: editor = os.getenv('EDITOR')
+    if editor is None: editor = 'vi'
+
     # when run from git on *nix, stdin isn't connected to the terminal
     # this causes some editors (e.g. vi) to behave strangely, so we set it explicitly
     windows = (os.name == 'nt')
