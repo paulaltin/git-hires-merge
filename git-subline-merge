@@ -52,25 +52,18 @@ except ImportError:
 class color:
 
     bold = '\033[1m'
-    red = '\033[91m'
-    green = '\033[92m'
-    yellow = '\033[93m'
-    blue = '\033[94m'
-    purple = '\033[95m'
-    cyan = '\033[96m'
-    black = '\033[30m'
-    bg_red = '\033[41m'
-    bg_yellow = '\033[103m'
-    bg_green = '\033[42m'
+    welcome = '\033[1m\033[91m'             # bold, red
+    info = '\033[96m'                       # cyan
+    highlight = '\033[103m\033[1m\033[30m'  # bold, black, yellow bg
+    added1 = '\033[48;5;28m'                # bright green
+    added2 = '\033[48;5;22m'                # dark green
+    deleted1 = '\033[48;5;124m'             # bright red
+    deleted2 = '\033[48;5;88m'              # dark red
+    deleted_both = '\033[48;5;166m'         # orange
+    success = '\033[92m'                    # green
+    warning = '\033[93m'                    # yellow
+    error = '\033[91m'                      # red
     end = '\033[0m'
-
-    info = cyan
-    highlight = bg_yellow + black
-    added = bg_green
-    deleted = bg_red
-    success = green
-    warning = yellow
-    error = red
 
 
 # for syntax highlighting using Pygments (if available)
@@ -101,6 +94,7 @@ def file_len(f):
 
 
 # get the line numbers of the beginning and end of a conflicted hunk
+# the file parameter is a path to a file on disk
 def find_nth_conflicted_hunk(file, n):
     start = stop = -1
     with open(file, 'r') as f:
@@ -119,6 +113,8 @@ def find_nth_conflicted_hunk(file, n):
 
 
 # find nth conflict in file and replace it with given lines
+# the file parameter is a path to a file on disk
+# lines is a list of strings
 def replace_nth_conflicted_hunk_with_lines(file, n, lines):
     contents = None
     with open(file, 'r') as f:
@@ -161,9 +157,52 @@ def get_exit_status(exit_code):
 ### DIFFS ###
 #############
 
-# find line numbers of added, deleted and changed lines
-def classify_diff_lines(file1, file2):
+# print one version of a hunk, highlighting the differences between it and the other version(s)
+# display is either 'current', 'base' or 'other'
+# added lines are indicated by a leading '+' and are highlighted in green
+# deleted lines are indicated by a leading '-' and are highlighted in red
+# changed lines are indicated by a leading '*' and changes within them are highlighted in either green or red
+# for current or other version, we just need to highlight the differences between it
+#   and the base version, which can only be changes or additions
+# for the base version, we want to highlight the differences between it and BOTH
+#   the current and the other version, which can only be changes or deletions
+# we take the diff with both versions and combine them by keeping all color codes
+def print_formatted_diff(hunk, display):
 
+    if display == 'current' or display == 'other':
+
+        old = hunk[1]
+        new = hunk[0] if display == 'current' else hunk[2]
+        color_added = color.added1 if display == 'current' else color.added2
+        color_deleted = color.deleted1 if display == 'current' else color.deleted2
+        clines = format_diff(old, new, 'new', color_added, color_deleted)
+
+        for ln in clines:
+            print(ln)
+
+    elif display == 'base':
+
+        clines1 = format_diff(hunk[1], hunk[0], 'old', color.added1, color.deleted1)
+        clines2 = format_diff(hunk[1], hunk[2], 'old', color.added2, color.deleted2)
+        clines = combine_colors(clines1, clines2, color.deleted1, color.deleted2, color.deleted_both)
+
+        for ln in clines:
+            print(ln)
+
+
+# add colors and prefixes showing the parts added or deleted between two versions
+# fold and fnew are file handles for the old and new versions
+# display must be either 'old' or 'new'
+# added lines are indicated by a leading '+' and are highlighted using color_added
+# deleted lines are indicated by a leading '-' and are highlighted using color_deleted
+# changed lines are indicated by a leading '*' and changes within them are highlighted using color_added and color_deleted
+def format_diff(fold, fnew, display, color_added, color_deleted):
+
+    # reset file handles
+    fold.seek(0)
+    fnew.seek(0)
+
+    # find line numbers of added, deleted and changed lines
     # for added and deleted groups, get the (zero-indexed) number of the first line and the length of the group
     # for changed groups, get the (zero-indexed) numbers of the first and one past the last line
     # ideally we'd use \n as the delimiter, but these break the shell on Windows
@@ -172,7 +211,7 @@ def classify_diff_lines(file1, file2):
     newformat = ' --new-group-format="A%de+%dn,%dE+%dN' + delimiter + '" '
     changedformat = ' --changed-group-format="C%de+%dl,%dE+%dL' + delimiter + '" '
     unchangedformat = ' --unchanged-group-format="" '
-    cmd = 'diff' + oldformat + newformat + changedformat + unchangedformat + file1 + ' ' + file2
+    cmd = 'diff' + oldformat + newformat + changedformat + unchangedformat + fold.name + ' ' + fnew.name
     hunks = [h for h in os.popen(cmd).read().split(delimiter) if len(h)]
 
     # extract indices from diff output
@@ -196,20 +235,43 @@ def classify_diff_lines(file1, file2):
             start,stop = [int(x) for x in c[1].split('+')]
             newchange += [[start, stop]]
 
-    return added, deleted, oldchange, newchange
+    # generate a list of lines with prefixes and highlighting
+    lines = []
+    i, j = 0, 0
+    old = fold.read().splitlines()
+    new = fnew.read().splitlines()
+    version = old if display == 'old' else new
+    change = oldchange if display == 'old' else newchange
+
+    while i < len(version):
+        if display == 'new' and i in added:
+            lines.append('+ ' + color_added + highlight_syntax(version[i]) + color.end)
+        elif display == 'old' and i in deleted:
+            lines.append('- ' + color_deleted + highlight_syntax(version[i]) + color.end)
+        elif j < len(change) and i == change[j][0]:
+            oldhunk = old[oldchange[j][0]:oldchange[j][1]]
+            newhunk = new[newchange[j][0]:newchange[j][1]]
+            coloredhunk = format_changed_hunk(oldhunk, newhunk, display, color_added, color_deleted)
+            for ln in coloredhunk:
+                lines.append('* ' + highlight_syntax(ln))
+            i += change[j][1] - change[j][0] - 1        # 1 will be added later
+            j += 1
+        else:
+            lines.append('  ' + highlight_syntax(version[i]))
+        i += 1
+
+    return lines
 
 
-# print diff lines with coloring
-def print_added_line(ln):
-    print('+ ' + color.added + ln + color.end)
+# word-level diff with coloring
+# additions are highlighted using color_added, deletions using color_deleted
+# h1 and h2 are lists of strings (lines)
+# display must be either 'old' or 'new'
+# return value is a list of strings (lines) that matches
+#   either h1 or h2, depending on the value of display
+def format_changed_hunk(h1, h2, display, color_added, color_deleted):
 
-def print_deleted_line(ln):
-    print('- ' + color.deleted + ln + color.end)
-
-def print_unchanged_line(ln):
-    print('  ' + ln)
-
-def print_changed_hunk(h1, h2, which):
+    result = ''
 
     # split lines at non-word characters
     # keep track of where the linebreaks are in terms of segment index
@@ -246,71 +308,92 @@ def print_changed_hunk(h1, h2, which):
         if c == '+':
             added.append(i)
 
-    if which == 'old':
-        sys.stdout.write('* ')
+    if display == 'old':
         for i,w in enumerate(splA):
-            if i in lcA:
-                sys.stdout.write('\n* ')
-            if i in removed:
-                sys.stdout.write(color.deleted)
-            sys.stdout.write(highlight_syntax(w).rstrip('\n'))
-            sys.stdout.write(color.end)
-        print('')
+            if i in lcA:     result += '\n'
+            if i in removed: result += color_deleted
+            result += w.rstrip('\n')
+            if i in removed: result += color.end
 
-    elif which == 'new':
-        sys.stdout.write('* ')
+    elif display == 'new':
         for i,w in enumerate(splB):
-            if i in lcB:
-                sys.stdout.write('\n* ')
-            if i in added:
-                sys.stdout.write(color.added)
-            sys.stdout.write(highlight_syntax(w).rstrip('\n'))
-            sys.stdout.write(color.end)
-        print('')
+            if i in lcB:    result += '\n'
+            if i in added:  result += color_added
+            result += w.rstrip('\n')
+            if i in added:  result += color.end
 
     tmpA.close()
     tmpB.close()
 
+    return result.split('\n')
 
-# print colorized diffs
-def show_diff(fh1, fh2, which):
 
-    a,d,o,n = classify_diff_lines(fh1.name, fh2.name)
+# combine highlighting from two versions of the same (base) hunk and print
+# lines1 and lines2 are lists of strings (lines) and must be identical
+#   except for highlighting with color1 and color2
+# regions which are highlighted in both versions will be printed with color_both
+def combine_colors(lines1, lines2, color1, color2, color_both):
 
-    fh1.seek(0)
-    f1 = fh1.read().splitlines()
-    fh2.seek(0)
-    f2 = fh2.read().splitlines()
-    i, ch = 0, 0
+    # merge the two versions
+    lines = []
+    assert len(lines1) == len(lines2)
+    
+    for ln1, ln2 in zip(lines1, lines2):
 
-    if which == 'old':
-        while i < len(f1):
-            if i in d:
-                print_deleted_line(f1[i])
-            elif ch < len(o) and i == o[ch][0]:
-                old = f1[o[ch][0]:o[ch][1]]
-                new = f2[n[ch][0]:n[ch][1]]
-                print_changed_hunk(old, new, 'old')
-                i += o[ch][1] - o[ch][0] - 1
-                ch += 1
-            else:
-                print_unchanged_line(f1[i])
+        i, j = 0, 0
+        result = ''
+        highlight1, highlight2 = False, False
+
+        # remove prefixes (we will add them back later)
+        prefixes = [ln1[0], ln2[0]]
+        ln1, ln2 = ln1[2:], ln2[2:]
+
+        # i iterates through ln1, j iterates through ln2
+        while i < len(ln1) or j < len(ln2):
+
+            # add special characters from version 1
+            if i < len(ln1):
+
+                if ln1[i:i+len(color1)] == color1:
+                    result += (color.end + color_both) if highlight2 else color1
+                    highlight1 = True
+                    i += len(color1)
+                    continue
+                
+                elif ln1[i:i+len(color.end)] == color.end:
+                    highlight1 = False
+                    result += color.end
+                    if highlight2: result += color2
+                    i += len(color.end)
+                    continue
+
+            # add special characters from version 2
+            if j < len(ln2):
+
+                if ln2[j:j+len(color2)] == color2:
+                    result += (color.end + color_both) if highlight1 else color2
+                    highlight2 = True
+                    j += len(color2)
+                    continue
+
+                elif ln2[j:j+len(color.end)] == color.end:
+                    highlight2 = False
+                    result += color.end
+                    if highlight1: result += color1
+                    j += len(color.end)
+                    continue
+
+            # all other characters should match
+            assert ln1[i] == ln2[j]
+            result += ln1[i]
             i += 1
+            j += 1
 
+        # add prefix and print line
+        prefix = '- ' if '-' in prefixes else '* ' if '*' in prefixes else '  '
+        lines.append(prefix + highlight_syntax(result))
 
-    elif which == 'new':
-        while i < len(f2):
-            if i in a:
-                print_added_line(f2[i])
-            elif ch < len(n) and i == n[ch][0]:
-                old = f1[o[ch][0]:o[ch][1]]
-                new = f2[n[ch][0]:n[ch][1]]
-                print_changed_hunk(old, new, 'new')
-                i += n[ch][1] - n[ch][0] - 1
-                ch += 1
-            else:
-                print_unchanged_line(f2[i])
-            i += 1
+    return lines
 
 
 
@@ -329,7 +412,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
     # only process small hunks
     if all([s <= 32 for s in sizes]):
 
-        print(color.bold + color.highlight + '\nConflicted hunk %d of %d (spans %d/%d/%d lines) in %s...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.end)
+        print(color.highlight + '\nConflicted hunk %d of %d (spans %d/%d/%d lines) in %s...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.end)
 
         # ask user for action to take
         while True:
@@ -364,14 +447,12 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                             break
             if action in ['v','x']:
                 print(color.info + marker_start + ' Current version' + color.end)
-                show_diff(hunk[1], hunk[0], 'new')
+                print_formatted_diff(hunk, 'current')
                 print(color.info + marker_base + ' Base version' + color.end)
-                show_diff(hunk[1], hunk[0], 'old')
-                print(color.info + marker_other + color.end)
-                show_diff(hunk[1], hunk[2], 'old')
-                print(color.info + marker_base + ' Base version' + color.end)
-                show_diff(hunk[1], hunk[2], 'new')
-                print(color.info + marker_end + ' Other version' + color.end)
+                print_formatted_diff(hunk, 'base')
+                print(color.info + marker_other + ' Other version' + color.end)
+                print_formatted_diff(hunk, 'other')
+                print(color.info + marker_end + color.end)
             if action == 'x':
                 length = file_len(current)
                 with open(current, 'r') as c:
@@ -550,7 +631,7 @@ if num_conflicts == 0:
     sys.exit(0)
 
 # welcome message
-print(color.bold + color.red + '\ngit-subline-merge v1.0\n' + color.end)
+print(color.welcome + '\ngit-subline-merge v1.0\n' + color.end)
 
 # pygments lexer and formatter for syntax coloring
 lexer = None
