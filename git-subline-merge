@@ -33,10 +33,15 @@ if os.name == 'nt':
 from builtins import input
 
 # syntax highlighting
-from pygments import highlight
-from pygments.styles import get_style_by_name
-from pygments.lexers import get_lexer_for_filename
-from pygments.formatters import Terminal256Formatter
+try:
+    from pygments import highlight
+    from pygments.styles import get_style_by_name
+    from pygments.lexers import get_lexer_for_filename
+    from pygments.formatters import Terminal256Formatter
+    from pygments.util import ClassNotFound as PygmentsLexerNotFound
+    has_pygments = True
+except ImportError:
+    has_pygments = False
 
 
 ###############
@@ -66,6 +71,13 @@ class color:
     success = green
     warning = yellow
     error = red
+
+
+# for syntax highlighting using Pygments (if available)
+def highlight_syntax(text):
+    if has_pygments and lexer is not None and formatter is not None:
+        return highlight(text, lexer, formatter)
+    return text
 
 
 # get number of lines in a file, either from a name or a file handle
@@ -241,7 +253,7 @@ def print_changed_hunk(h1, h2, which):
                 sys.stdout.write('\n* ')
             if i in removed:
                 sys.stdout.write(color.deleted)
-            sys.stdout.write(highlight(w, lexer, formatter).rstrip('\n'))
+            sys.stdout.write(highlight_syntax(w).rstrip('\n'))
             sys.stdout.write(color.end)
         print('')
 
@@ -252,7 +264,7 @@ def print_changed_hunk(h1, h2, which):
                 sys.stdout.write('\n* ')
             if i in added:
                 sys.stdout.write(color.added)
-            sys.stdout.write(highlight(w, lexer, formatter).rstrip('\n'))
+            sys.stdout.write(highlight_syntax(w).rstrip('\n'))
             sys.stdout.write(color.end)
         print('')
 
@@ -347,7 +359,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 with open(current, 'r') as c:
                     for i,l in enumerate(c):
                         if i in range(max(0, start-10), start):
-                            print(highlight(l, lexer, formatter).rstrip('\n'))
+                            print(highlight_syntax(l).rstrip('\n'))
                         elif i >= start:
                             break
             if action in ['v','x']:
@@ -365,14 +377,15 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 with open(current, 'r') as c:
                     for i,l in enumerate(c):
                         if i in range(stop, min(stop+10, length)):
-                            print(highlight(l, lexer, formatter).rstrip('\n'))
+                            print(highlight_syntax(l).rstrip('\n'))
                         elif i >= stop:
                             break
             elif action == 's':
                 result = subline_merge_hunk(hunk)
                 if result is not None:
                     print(color.info + marker_start + ' Sub-line merge yields:' + color.end)
-                    if len(result): print(highlight('\n'.join([x.rstrip('\n') for x in result]), lexer, formatter).rstrip('\n'))
+                    if len(result):
+                        print(highlight_syntax('\n'.join([x.rstrip('\n') for x in result])).rstrip('\n'))
                     print(color.info + marker_end + color.end + '\n')
                     accept = ask_for_input('Accept sub-line merge', ['y','n'])
                     success = True if accept == 'y' else False
@@ -386,7 +399,8 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 result = manual_merge_hunk(hunk)
                 if result is not None:
                     print(color.info + marker_start + ' Manual resolution is:' + color.end)
-                    if len(result): print(highlight('\n'.join([x.rstrip('\n') for x in result]), lexer, formatter).rstrip('\n'))
+                    if len(result):
+                        print(highlight_syntax('\n'.join([x.rstrip('\n') for x in result])).rstrip('\n'))
                     print(color.info + marker_end + color.end + '\n')
                     accept = ask_for_input('Accept manual resolution', ['y','n'])
                     success = True if accept == 'y' else False
@@ -401,7 +415,8 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 result = hunk[idx].readlines()
                 branchname = ['Current','Base','Other'][idx]
                 print(color.info + marker_start + ' ' + branchname + ' version is:' + color.end)
-                if len(result): print(highlight('\n'.join([x.rstrip('\n') for x in result]), lexer, formatter).rstrip('\n'))
+                if len(result):
+                    print(highlight_syntax('\n'.join([x.rstrip('\n') for x in result])).rstrip('\n'))
                 print(color.info + marker_end + color.end + '\n')
                 warn = ['the other branch', 'both branches', 'the current branch'][idx]
                 print(color.bold + color.warning + 'Warning: this will discard changes on ' + warn + '!' + color.end + '\n')
@@ -534,12 +549,20 @@ num_conflicts = get_exit_status(status)
 if num_conflicts == 0:
     sys.exit(0)
 
-# pygments lexer and formatter for syntax coloring
-lexer = get_lexer_for_filename(filename)
-formatter = Terminal256Formatter(style=get_style_by_name('vim'))
-
 # welcome message
 print(color.bold + color.red + '\ngit-subline-merge v1.0\n' + color.end)
+
+# pygments lexer and formatter for syntax coloring
+lexer = None
+formatter = None
+if has_pygments:
+    try:
+        lexer = get_lexer_for_filename(filename)
+    except PygmentsLexerNotFound:
+        print(color.warning + 'Pygments error: no lexer found for file %s; syntax highlighting unavailable' % filename + color.end + '\n')
+    formatter = Terminal256Formatter(style=get_style_by_name('vim'))
+else:
+        print(color.warning + 'Pygments module not installed; syntax highlighting unavailable' + color.end + '\n')
 
 # make temporary files
 # one is a copy of the conflicted 'current', to iterate with
