@@ -25,23 +25,11 @@
 import os, sys, re, tempfile
 from subprocess import call
 from shutil import copyfile
+from builtins import input
 
 if os.name == 'nt':
     from colorama import init
 
-# Python 2 compatibility
-from builtins import input
-
-# syntax highlighting
-try:
-    from pygments import highlight
-    from pygments.styles import get_style_by_name
-    from pygments.lexers import get_lexer_for_filename
-    from pygments.formatters import Terminal256Formatter
-    from pygments.util import ClassNotFound as PygmentsLexerNotFound
-    has_pygments = True
-except ImportError:
-    has_pygments = False
 
 
 ###############
@@ -64,13 +52,6 @@ class color:
     warning = '\033[93m'                    # yellow
     error = '\033[91m'                      # red
     end = '\033[0m'
-
-
-# for syntax highlighting using Pygments (if available)
-def highlight_syntax(text):
-    if has_pygments and lexer is not None and formatter is not None:
-        return highlight(text, lexer, formatter)
-    return text
 
 
 # get number of lines in a file, either from a name or a file handle
@@ -245,19 +226,19 @@ def format_diff(fold, fnew, display, color_added, color_deleted):
 
     while i < len(version):
         if display == 'new' and i in added:
-            lines.append('+ ' + color_added + highlight_syntax(version[i]) + color.end)
+            lines.append('+ ' + color_added + version[i] + color.end)
         elif display == 'old' and i in deleted:
-            lines.append('- ' + color_deleted + highlight_syntax(version[i]) + color.end)
+            lines.append('- ' + color_deleted + version[i] + color.end)
         elif j < len(change) and i == change[j][0]:
             oldhunk = old[oldchange[j][0]:oldchange[j][1]]
             newhunk = new[newchange[j][0]:newchange[j][1]]
             coloredhunk = format_changed_hunk(oldhunk, newhunk, display, color_added, color_deleted)
             for ln in coloredhunk:
-                lines.append('* ' + highlight_syntax(ln))
+                lines.append('* ' + ln)
             i += change[j][1] - change[j][0] - 1        # 1 will be added later
             j += 1
         else:
-            lines.append('  ' + highlight_syntax(version[i]))
+            lines.append('  ' + version[i])
         i += 1
 
     return lines
@@ -391,7 +372,7 @@ def combine_colors(lines1, lines2, color1, color2, color_both):
 
         # add prefix and print line
         prefix = '- ' if '-' in prefixes else '* ' if '*' in prefixes else '  '
-        lines.append(prefix + highlight_syntax(result))
+        lines.append(prefix + result)
 
     return lines
 
@@ -442,7 +423,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 with open(current, 'r') as c:
                     for i,l in enumerate(c):
                         if i in range(max(0, start-10), start):
-                            print(highlight_syntax(l).rstrip('\n'))
+                            print(l.rstrip('\n'))
                         elif i >= start:
                             break
             if action in ['v','x']:
@@ -458,7 +439,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 with open(current, 'r') as c:
                     for i,l in enumerate(c):
                         if i in range(stop, min(stop+10, length)):
-                            print(highlight_syntax(l).rstrip('\n'))
+                            print(l.rstrip('\n'))
                         elif i >= stop:
                             break
             elif action == 's':
@@ -466,7 +447,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 if result is not None:
                     print(color.info + marker_start + ' Sub-line merge yields:' + color.end)
                     if len(result):
-                        print(highlight_syntax('\n'.join([x.rstrip('\n') for x in result])).rstrip('\n'))
+                        print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
                     print(color.info + marker_end + color.end + '\n')
                     accept = ask_for_input('Accept sub-line merge', ['y','n'])
                     success = True if accept == 'y' else False
@@ -481,7 +462,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 if result is not None:
                     print(color.info + marker_start + ' Manual resolution is:' + color.end)
                     if len(result):
-                        print(highlight_syntax('\n'.join([x.rstrip('\n') for x in result])).rstrip('\n'))
+                        print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
                     print(color.info + marker_end + color.end + '\n')
                     accept = ask_for_input('Accept manual resolution', ['y','n'])
                     success = True if accept == 'y' else False
@@ -497,7 +478,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                 branchname = ['Current','Base','Other'][idx]
                 print(color.info + marker_start + ' ' + branchname + ' version is:' + color.end)
                 if len(result):
-                    print(highlight_syntax('\n'.join([x.rstrip('\n') for x in result])).rstrip('\n'))
+                    print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
                 print(color.info + marker_end + color.end + '\n')
                 warn = ['the other branch', 'both branches', 'the current branch'][idx]
                 print(color.bold + color.warning + 'Warning: this will discard changes on ' + warn + '!' + color.end + '\n')
@@ -632,18 +613,6 @@ if num_conflicts == 0:
 
 # welcome message
 print(color.welcome + '\ngit-subline-merge v1.0\n' + color.end)
-
-# pygments lexer and formatter for syntax coloring
-lexer = None
-formatter = None
-if has_pygments:
-    try:
-        lexer = get_lexer_for_filename(filename)
-    except PygmentsLexerNotFound:
-        print(color.warning + 'Pygments error: no lexer found for file %s; syntax highlighting unavailable' % filename + color.end + '\n')
-    formatter = Terminal256Formatter(style=get_style_by_name('vim'))
-else:
-        print(color.warning + 'Pygments module not installed; syntax highlighting unavailable' + color.end + '\n')
 
 # make temporary files
 # one is a copy of the conflicted 'current', to iterate with
