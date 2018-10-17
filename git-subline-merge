@@ -554,7 +554,7 @@ def manual_merge_hunk(hunk):
 
     # imitate the process that Git uses to determine which editor to use
     editor = os.getenv('GIT_EDITOR')
-    if editor is None: editor = os.popen('git config core.editor').read().rstrip('\n')
+    if editor is None: editor = os.popen('git config core.editor').read().rstrip('\n') or None
     if editor is None: editor = os.getenv('VISUAL')
     if editor is None: editor = os.getenv('EDITOR')
     if editor is None: editor = 'vi'
