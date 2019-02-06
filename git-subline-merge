@@ -325,7 +325,7 @@ def combine_colors(lines1, lines2, color1, color2, color_both):
     # merge the two versions
     lines = []
     assert len(lines1) == len(lines2)
-    
+
     for ln1, ln2 in zip(lines1, lines2):
 
         i, j = 0, 0
@@ -347,7 +347,7 @@ def combine_colors(lines1, lines2, color1, color2, color_both):
                     highlight1 = True
                     i += len(color1)
                     continue
-                
+
                 elif ln1[i:i+len(color.end)] == color.end:
                     highlight1 = False
                     result += color.end
