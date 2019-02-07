@@ -19,6 +19,10 @@ Installation
 ------------
 * Step 1: place this script somewhere on your path
 
+If you just want to run this script manually on conflicted files, then stop here - you're done.
+
+Otherwise, if you want to use this script as a custom merge driver that git will call automatically when a merge or rebase operation hits a conflict, then continue on:
+
 * Step 2: add these lines to your ~/.gitconfig:
 
 ```
@@ -39,10 +43,25 @@ Features
 --------
 - Interactive resolution of conflicts on adjacent lines
 - Interactive resolution of non-overlapping conflicts on individual lines
-- Can be used during both merging and rebasing operations
+- Can be used automatically during merging/rebasing operations, or manually from the command line
 - Word-level diff highlighting shows exactly what has changed on each branch
 - Option to resolve manually using the default git editor
 - Environment variables to control which hunks are unlikely to be resolvable and should be skipped
+
+
+A note on diff3
+---------------
+If you run this script manually on a conflicted file, you may encounter an error about "badly formatted conflicts found in file", with a suggestion to change your conflictstyle to diff3. What's that about?
+
+By default, Git leaves the two new versions of a conflicted hunk in the file, surrounded by conflict markers '<<<<<<<', '=======' and '>>>>>>>'. However, to figure out how to resolve the conflict it's often necessary to know the original version, to see what changes were made on each branch. This is what diff3 does. Once you have diff3 turned on, you will see a third section beginning with '|||||||' in each conflict, which shows the "common ancestor" version of the hunk. Since you often need the ancestor to determine what the correct merge is, this feature is so useful that a lot of people (including me) think it should be the default.
+
+In any case, git-subline-merge needs the common ancestor version to resolve conflicts, so it can only be run manually on conflicted files which were created using diff3.
+
+To enable the diff3 conflictstyle, simply run this command
+
+```
+git config --global merge.conflictstyle diff3
+```
 
 
 How does it work?

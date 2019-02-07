@@ -9,7 +9,7 @@
 #
 # An interactive git merge driver which can resolve non-overlapping conflicts on individual or adjacent lines.
 #
-# To install, place this script somewhere on your path, add these lines to your ~/.gitconfig:
+# To install for use during merge/rebase, place this script somewhere on your path, add these lines to your ~/.gitconfig:
 #
 #     [merge "git-subline-merge"]
 #         name = An interactive merge driver for resolving sub-line conflicts
@@ -19,6 +19,8 @@
 # and this to your git attributes file (e.g. ~/.config/git/attributes):
 #
 #     * merge=git-subline-merge
+#
+# Alternatively, run this script on a conflicted file using 'git-subline-merge /path/to/file'
 #
 
 
@@ -588,30 +590,60 @@ def manual_merge_hunk(hunk):
 ### MAIN ###
 ############
 
-# arguments passed in by git:
-# [1] name of temp file containing base version of file
-# [2] name of temp file containing current version of file
-# [3] name of temp file containing other version of file
-# [4] length of conflict markers (default is 7 for <<<<<<<)
-# [5] name of conflicted file
-# the result should be left in the current version (argv[2])
-base, current, other, marker_len, filename = sys.argv[1:]
-
 # initialize colorama for colored terminal output on Windows
 if os.name == 'nt':
     init()
 
-# conflict markers can have custom lengths
-marker_len = int(marker_len)
-marker_start = '<' * marker_len
-marker_base = '|' * marker_len
-marker_other = '=' * marker_len
-marker_end = '>' * marker_len
+# invoked by git
+if len(sys.argv) == 6:
 
-# run git merge on the files using diff3 (result is written to 'current')
-# the number of conflicts is encoded in the exit status of the git-merge-file command
-status = os.system('git merge-file --diff3 --marker-size=%d -L "Current version" -L "Base version" -L "Other version" %s %s %s' % (marker_len, current, base, other))
-num_conflicts = get_exit_status(status)
+    # arguments passed in by git:
+    # [1] name of temp file containing base version of file
+    # [2] name of temp file containing current version of file
+    # [3] name of temp file containing other version of file
+    # [4] length of conflict markers (default is 7 for <<<<<<<)
+    # [5] name of conflicted file
+    # the result should be left in the current version (argv[2])
+    base, current, other, marker_len, filename = sys.argv[1:]
+    marker_len = int(marker_len)
+    marker_start = '<' * marker_len
+    marker_base = '|' * marker_len
+    marker_other = '=' * marker_len
+    marker_end = '>' * marker_len
+
+    # run git merge on the files using diff3 (result is written to 'current')
+    # the number of conflicts is encoded in the exit status of the git-merge-file command
+    status = os.system('git merge-file --diff3 --marker-size=%d -L "Current version" -L "Base version" -L "Other version" %s %s %s' % (marker_len, current, base, other))
+    num_conflicts = get_exit_status(status)
+
+# invoked manually on a single file
+else:
+
+    # first argument is path to file
+    current = sys.argv[1]
+    filename = current
+
+    # optional second argument for conflict marker size (default is 7 for <<<<<<<)
+    marker_len = int(sys.argv[2]) if len(sys.argv) == 3 else 7
+    marker_start = '<' * marker_len
+    marker_base = '|' * marker_len
+    marker_other = '=' * marker_len
+    marker_end = '>' * marker_len
+
+    # use grep to find number of conflicts in the file
+    num_start = int(os.popen('grep -c "^%s" "%s"' % (marker_start, current)).read())
+    num_base = int(os.popen('grep -c "^%s" "%s"' % (marker_base, current)).read())
+    num_other = int(os.popen('grep -c "^%s" "%s"' % (marker_other, current)).read())
+    num_end = int(os.popen('grep -c "^%s" "%s"' % (marker_end, current)).read())
+
+    # check that the number of conflict markers match
+    # if they don't, probably the merge wasn't generated using diff3, and we can't resolve conflicts without the base version
+    if num_start == num_base == num_other == num_end:
+        num_conflicts = num_start
+    else:
+        print('Badly formatted conflicts found in file. Possibly you need to change your conflictstyle to diff3?')
+        sys.exit(1)
+
 
 # sometimes (e.g. during interactive rebase) this script is called even though
 # there are no conflicts - in that case just exit successfully here
