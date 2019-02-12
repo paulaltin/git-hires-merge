@@ -32,6 +32,11 @@ from builtins import input
 if os.name == 'nt':
     from colorama import init
 
+# improved command line editing on *nix
+try:
+    import readline
+except ImportError:
+    pass
 
 
 MAX_HUNK_SIZE = 16
