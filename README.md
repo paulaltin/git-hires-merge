@@ -76,9 +76,9 @@ Advanced options
 ----------------
 In general, a sub-line merge is less likely to succeed the larger the conflicted hunk is, and the larger the difference in size between the original ('base') version and the two new versions ('current' and 'other').
 
-If you find that `git-subline-merge` is stopping too often on conflicted hunks that it can't resolve, or skipping too many that it could have resolved, you can tune the `MAX_SIZE` and `MAX_SIZE_DIFF` constants to control which hunks are processed and which are skipped. These constants are found at the top of the script, or they can be set using environment variables `GIT_SUBLINE_MERGE_MAX_SIZE` and `GIT_SUBLINE_MERGE_MAX_SIZE_DIFF`.
+If you find that `git-subline-merge` is stopping too often on conflicted hunks that it can't resolve, or skipping too many that it could have resolved, you can tune the `MAX_HUNK_SIZE` and `MAX_HUNK_SIZE_DIFF` constants to control which hunks are processed and which are skipped. These constants are found at the top of the script, or they can be set using environment variables `GIT_SUBLINE_MERGE_MAX_HUNK_SIZE` and `GIT_SUBLINE_MERGE_MAX_HUNK_SIZE_DIFF`.
 
-The default values are `MAX_SIZE = 16` and `MAX_SIZE_DIFF = 8`, which means that conflicts spanning more than 16 lines, or whose versions differ by more than 8 lines, will be skipped. For example, a conflict which spans `12/14/14` lines in the current, base and other versions will be processed, but a conflict which spans `6/8/15` lines will be skipped.
+The default values are `MAX_HUNK_SIZE = 16` and `MAX_HUNK_SIZE_DIFF = 8`, which means that conflicts spanning more than 16 lines, or whose versions differ by more than 8 lines, will be skipped. For example, a conflict which spans `12/14/14` lines in the current, base and other versions will be processed, but a conflict which spans `6/8/15` lines will be skipped.
 
 The optimal values of these constants will depend on what kind of text you are merging, so the best thing to do is to experiment until you find values that work well for your situation.
 
