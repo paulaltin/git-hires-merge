@@ -404,7 +404,6 @@ def process_hunk(hunk, index, resolved, num_conflicts):
 
     first_run = True
     fixed = abort = False
-    interactive = not bool(strtobool(os.getenv('GIT_SUBLINE_MERGE_NON_INTERACTIVE_MODE', str(NON_INTERACTIVE_MODE))))
 
     # get number of lines in current, base and other hunks
     sizes = [file_len(f) for f in hunk]
@@ -680,8 +679,12 @@ else:
 if num_conflicts == 0:
     sys.exit(0)
 
+# interactive or non-interactive mode
+interactive = not bool(strtobool(os.getenv('GIT_SUBLINE_MERGE_NON_INTERACTIVE_MODE', str(NON_INTERACTIVE_MODE))))
+
 # welcome message
-print(color.welcome + '\ngit-subline-merge v1.0\n' + color.end)
+if interactive:
+    print(color.welcome + '\ngit-subline-merge v1.0\n' + color.end)
 
 # make temporary files
 # one is a copy of the conflicted 'current', to iterate with
@@ -728,8 +731,9 @@ tmp.close()
 for h in hunk: h.close()
 
 # print resolution
+newline = '\n' if interactive else ''
 col = color.success if resolved == num_conflicts else color.warning if resolved > 0 else color.error
-print(col + color.bold + '\nResolved %d of %d conflicts in %s\n' % (resolved, num_conflicts, filename) + color.end)
+print(col + color.bold + newline + 'Resolved %d of %d conflicts in %s' % (resolved, num_conflicts, filename) + newline + color.end)
 
 # de-initialize colorama
 if os.name == 'nt':
