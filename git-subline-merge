@@ -29,6 +29,11 @@ from subprocess import call
 from shutil import copyfile
 from builtins import input
 
+try:
+    from distutils.util import strtobool
+except ImportError:
+    from distutils import strtobool
+
 if os.name == 'nt':
     from colorama import init
 
@@ -41,6 +46,7 @@ except ImportError:
 
 MAX_HUNK_SIZE = 16
 MAX_HUNK_SIZE_DIFF = 8
+NON_INTERACTIVE_MODE = False
 
 
 
@@ -407,107 +413,125 @@ def process_hunk(hunk, index, resolved, num_conflicts):
     max_size_diff = int(os.getenv('GIT_SUBLINE_MERGE_MAX_HUNK_SIZE_DIFF', MAX_HUNK_SIZE_DIFF))
     if all([s <= max_size for s in sizes]) and max(abs(sizes[0]-sizes[1]), abs(sizes[2]-sizes[1])) <= max_size_diff:
 
-        print(color.highlight + '\nConflicted hunk %d of %d (spans %d/%d/%d lines) in %s...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.end)
+        # interactive mode
+        if interactive:
 
-        # ask user for action to take
-        while True:
+            print(color.highlight + '\nConflicted hunk %d of %d (spans %d/%d/%d lines) in %s...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.end)
 
-            if first_run:
-                print('')
-                action = 'v'
-                first_run = False
-            else:
-                print('')
-                print(color.bold + '   v - view entire hunk' + color.end)
-                print(color.bold + '   x - view hunk in context' + color.end)
-                print(color.bold + '   s - attempt sub-line merge' + color.end)
-                print(color.bold + '   m - resolve manually' + color.end)
-                print(color.bold + '   c - use current version' + color.end)
-                print(color.bold + '   b - use base version' + color.end)
-                print(color.bold + '   o - use other version' + color.end)
-                print(color.bold + '   k - skip this hunk' + color.end)
-                print(color.bold + '   q - skip all hunks in this file' + color.end)
-                action = ask_for_input('Resolve this hunk', ['v','x','s','m','c','b','o','k','q'])
-                print('')
+            # ask user for action to take
+            while True:
 
-            # actions
-            for f in hunk: f.seek(0)
-            if action == 'x':
-                start, stop = find_nth_conflicted_hunk(current, index-resolved)
-                with open(current, 'r') as c:
-                    for i,l in enumerate(c):
-                        if i in range(max(0, start-10), start):
-                            print(l.rstrip('\n'))
-                        elif i >= start:
+                for f in hunk: f.seek(0)
+
+                if first_run:
+                    print('')
+                    action = 'v'
+                    first_run = False
+                else:
+                    print('')
+                    print(color.bold + '   v - view entire hunk' + color.end)
+                    print(color.bold + '   x - view hunk in context' + color.end)
+                    print(color.bold + '   s - attempt sub-line merge' + color.end)
+                    print(color.bold + '   m - resolve manually' + color.end)
+                    print(color.bold + '   c - use current version' + color.end)
+                    print(color.bold + '   b - use base version' + color.end)
+                    print(color.bold + '   o - use other version' + color.end)
+                    print(color.bold + '   k - skip this hunk' + color.end)
+                    print(color.bold + '   q - skip all hunks in this file' + color.end)
+                    action = ask_for_input('Resolve this hunk', ['v','x','s','m','c','b','o','k','q'])
+                    print('')
+
+                # actions
+                if action == 'x':
+                    start, stop = find_nth_conflicted_hunk(current, index-resolved)
+                    with open(current, 'r') as c:
+                        for i,l in enumerate(c):
+                            if i in range(max(0, start-10), start):
+                                print(l.rstrip('\n'))
+                            elif i >= start:
+                                break
+                if action in ['v','x']:
+                    print(color.info + marker_start + ' Current version' + color.end)
+                    print_formatted_diff(hunk, 'current')
+                    print(color.info + marker_base + ' Base version' + color.end)
+                    print_formatted_diff(hunk, 'base')
+                    print(color.info + marker_other + ' Other version' + color.end)
+                    print_formatted_diff(hunk, 'other')
+                    print(color.info + marker_end + color.end)
+                if action == 'x':
+                    length = file_len(current)
+                    with open(current, 'r') as c:
+                        for i,l in enumerate(c):
+                            if i in range(stop, min(stop+10, length)):
+                                print(l.rstrip('\n'))
+                            elif i >= stop:
+                                break
+                elif action == 's':
+                    result = subline_merge_hunk(hunk)
+                    if result is not None:
+                        print(color.info + marker_start + ' Sub-line merge yields:' + color.end)
+                        if len(result):
+                            print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
+                        print(color.info + marker_end + color.end + '\n')
+                        accept = ask_for_input('Accept sub-line merge', ['y','n'])
+                        success = True if accept == 'y' else False
+                        if (success):
+                            replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
+                            fixed = True
                             break
-            if action in ['v','x']:
-                print(color.info + marker_start + ' Current version' + color.end)
-                print_formatted_diff(hunk, 'current')
-                print(color.info + marker_base + ' Base version' + color.end)
-                print_formatted_diff(hunk, 'base')
-                print(color.info + marker_other + ' Other version' + color.end)
-                print_formatted_diff(hunk, 'other')
-                print(color.info + marker_end + color.end)
-            if action == 'x':
-                length = file_len(current)
-                with open(current, 'r') as c:
-                    for i,l in enumerate(c):
-                        if i in range(stop, min(stop+10, length)):
-                            print(l.rstrip('\n'))
-                        elif i >= stop:
+                    else:
+                        print(color.bold + color.error + 'Sub-line merge failed, hunk has overlapping changes' + color.end)
+                elif action == 'm':
+                    result = manual_merge_hunk(hunk)
+                    if result is not None:
+                        print(color.info + marker_start + ' Manual resolution is:' + color.end)
+                        if len(result):
+                            print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
+                        print(color.info + marker_end + color.end + '\n')
+                        accept = ask_for_input('Accept manual resolution', ['y','n'])
+                        success = True if accept == 'y' else False
+                        if (success):
+                            replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
+                            fixed = True
                             break
-            elif action == 's':
-                result = subline_merge_hunk(hunk)
-                if result is not None:
-                    print(color.info + marker_start + ' Sub-line merge yields:' + color.end)
+                    else:
+                        print(color.bold + color.warning + 'User cancelled manual resolve' + color.end)
+                elif action in ['c','b','o']:
+                    idx = ['c','b','o'].index(action)
+                    result = hunk[idx].readlines()
+                    branchname = ['Current','Base','Other'][idx]
+                    print(color.info + marker_start + ' ' + branchname + ' version is:' + color.end)
                     if len(result):
                         print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
                     print(color.info + marker_end + color.end + '\n')
-                    accept = ask_for_input('Accept sub-line merge', ['y','n'])
+                    warn = ['the other branch', 'both branches', 'the current branch'][idx]
+                    print(color.bold + color.warning + 'Warning: this will discard changes on ' + warn + '!' + color.end + '\n')
+                    accept = ask_for_input('Accept', ['y','n'])
                     success = True if accept == 'y' else False
                     if (success):
                         replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
                         fixed = True
                         break
-                else:
-                    print(color.bold + color.error + 'Sub-line merge failed, hunk has overlapping changes' + color.end)
-            elif action == 'm':
-                result = manual_merge_hunk(hunk)
-                if result is not None:
-                    print(color.info + marker_start + ' Manual resolution is:' + color.end)
-                    if len(result):
-                        print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
-                    print(color.info + marker_end + color.end + '\n')
-                    accept = ask_for_input('Accept manual resolution', ['y','n'])
-                    success = True if accept == 'y' else False
-                    if (success):
-                        replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
-                        fixed = True
-                        break
-                else:
-                    print(color.bold + color.warning + 'User cancelled manual resolve' + color.end)
-            elif action in ['c','b','o']:
-                idx = ['c','b','o'].index(action)
-                result = hunk[idx].readlines()
-                branchname = ['Current','Base','Other'][idx]
-                print(color.info + marker_start + ' ' + branchname + ' version is:' + color.end)
-                if len(result):
-                    print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
-                print(color.info + marker_end + color.end + '\n')
-                warn = ['the other branch', 'both branches', 'the current branch'][idx]
-                print(color.bold + color.warning + 'Warning: this will discard changes on ' + warn + '!' + color.end + '\n')
-                accept = ask_for_input('Accept', ['y','n'])
-                success = True if accept == 'y' else False
-                if (success):
-                    replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
-                    fixed = True
+                elif action == 'k':
                     break
-            elif action == 'k':
-                break
-            elif action == 'q':
-                abort = True
-                break
+                elif action == 'q':
+                    abort = True
+                    break
 
+        # non-interactive mode
+        else:
+
+            for f in hunk: f.seek(0)
+            result = subline_merge_hunk(hunk)
+            if result is not None:
+                replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
+                print(color.bold + color.success + 'git-subline-merge resolved conflict %d of %d in %s' % (index, num_conflicts, filename) + color.end)
+                fixed = True
+            else:
+                print(color.bold + color.error + 'git-subline-merge failed to resolve conflict %d of %d in %s, hunk has overlapping changes' % (index, num_conflicts, filename) + color.end)
+
+
+    # hunk too large
     else:
         print(color.bold + color.info + '\nSkipping hunk %d of %d (spans %d/%d/%d lines) in %s, too large...' % (index, num_conflicts, sizes[0], sizes[1], sizes[2], filename) + color.end)
 
@@ -655,8 +679,12 @@ else:
 if num_conflicts == 0:
     sys.exit(0)
 
+# interactive or non-interactive mode
+interactive = not bool(strtobool(os.getenv('GIT_SUBLINE_MERGE_NON_INTERACTIVE_MODE', str(NON_INTERACTIVE_MODE))))
+
 # welcome message
-print(color.welcome + '\ngit-subline-merge v1.0\n' + color.end)
+if interactive:
+    print(color.welcome + '\ngit-subline-merge v1.0\n' + color.end)
 
 # make temporary files
 # one is a copy of the conflicted 'current', to iterate with
@@ -703,8 +731,9 @@ tmp.close()
 for h in hunk: h.close()
 
 # print resolution
+newline = '\n' if interactive else ''
 col = color.success if resolved == num_conflicts else color.warning if resolved > 0 else color.error
-print(col + color.bold + '\nResolved %d of %d conflicts in %s\n' % (resolved, num_conflicts, filename) + color.end)
+print(col + color.bold + newline + 'Resolved %d of %d conflicts in %s' % (resolved, num_conflicts, filename) + newline + color.end)
 
 # de-initialize colorama
 if os.name == 'nt':

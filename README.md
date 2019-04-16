@@ -82,6 +82,8 @@ The default values are `MAX_HUNK_SIZE = 16` and `MAX_HUNK_SIZE_DIFF = 8`, which 
 
 The optimal values of these constants will depend on what kind of text you are merging, so the best thing to do is to experiment until you find values that work well for your situation.
 
+If you are *really* confident that the subline merge will always do what you want, you can let `git-subline-merge` run automatically by setting `NON_INTERACTIVE_MODE` to `True` (or by setting the `GIT_SUBLINE_MERGE_NON_INTERACTIVE_MODE` environment variable). In this case, the script will try to merge conflicted hunks without asking for confirmation, leaving those that cannot be merged. However, this is strongly discouraged in most situations as it is likely to lead to erroneous merges. Use this only for predictable and repeatable conflicts which are known to merge successfully.
+
 
 Tested with
 -----------
