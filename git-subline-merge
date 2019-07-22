@@ -525,7 +525,10 @@ def process_hunk(hunk, index, resolved, num_conflicts):
             result = subline_merge_hunk(hunk)
             if result is not None:
                 replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
-                print(color.bold + color.success + 'git-subline-merge resolved conflict %d of %d in %s' % (index, num_conflicts, filename) + color.end)
+                print(color.bold + color.success + 'git-subline-merge resolved conflict %d of %d in %s, resulting hunk was:' % (index, num_conflicts, filename) + color.end)
+                print(color.info + marker_start + color.end)
+                if len(result): print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
+                print(color.info + marker_end + color.end)
                 fixed = True
             else:
                 print(color.bold + color.error + 'git-subline-merge failed to resolve conflict %d of %d in %s, hunk has overlapping changes' % (index, num_conflicts, filename) + color.end)
