@@ -29,24 +29,39 @@ from subprocess import call
 from shutil import copyfile
 from builtins import input
 
-try:
-    from distutils.util import strtobool
-except ImportError:
-    from distutils import strtobool
-
-if os.name == 'nt':
-    from colorama import init
-
 # improved command line editing on *nix
 try:
     import readline
 except ImportError:
     pass
 
+# for interpreting environment variables
+try:
+    from distutils.util import strtobool
+except ImportError:
+    from distutils import strtobool
+
+# for colored output on Windows
+if os.name == 'nt':
+    from colorama import init
+
+
+
+#############
+### SETUP ###
+#############
 
 MAX_HUNK_SIZE = 16
 MAX_HUNK_SIZE_DIFF = 8
 NON_INTERACTIVE_MODE = False
+
+# colors
+# don't use color if stdout is not a terminal or if it doesn't support at least 8-bit color
+# also respect NO_COLOR informal standard
+stdout_isatty = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
+term_colors = int(os.popen('which tput >/dev/null && tput colors').read() or 0)
+no_color = os.getenv('NO_COLOR') is not None
+show_color = stdout_isatty and term_colors >= 8 and not no_color
 
 
 
@@ -57,19 +72,19 @@ NON_INTERACTIVE_MODE = False
 # for colored output in terminal
 class color:
 
-    bold = '\033[1m'
-    welcome = '\033[1m\033[91m'             # bold, red
-    info = '\033[96m'                       # cyan
-    highlight = '\033[103m\033[1m\033[30m'  # bold, black, yellow bg
-    added1 = '\033[48;5;28m'                # bright green
-    added2 = '\033[48;5;22m'                # dark green
-    deleted1 = '\033[48;5;124m'             # bright red
-    deleted2 = '\033[48;5;88m'              # dark red
-    deleted_both = '\033[48;5;166m'         # orange
-    success = '\033[92m'                    # green
-    warning = '\033[93m'                    # yellow
-    error = '\033[91m'                      # red
-    end = '\033[0m'
+    bold          = '\033[1m'                    if show_color else ''
+    welcome       = '\033[1m\033[91m'            if show_color else ''   # bold, red
+    info          = '\033[96m'                   if show_color else ''   # cyan
+    highlight     = '\033[103m\033[1m\033[30m'   if show_color else ''   # bold, black, yellow bg
+    added1        = '\033[48;5;28m'              if show_color else ''   # bright green
+    added2        = '\033[48;5;22m'              if show_color else ''   # dark green
+    deleted1      = '\033[48;5;124m'             if show_color else ''   # bright red
+    deleted2      = '\033[48;5;88m'              if show_color else ''   # dark red
+    deleted_both  = '\033[48;5;166m'             if show_color else ''   # orange
+    success       = '\033[92m'                   if show_color else ''   # green
+    warning       = '\033[93m'                   if show_color else ''   # yellow
+    error         = '\033[91m'                   if show_color else ''   # red
+    end           = '\033[0m'                    if show_color else ''
 
 
 # get number of lines in a file, either from a name or a file handle
@@ -353,13 +368,13 @@ def combine_colors(lines1, lines2, color1, color2, color_both):
             # add special characters from version 1
             if i < len(ln1):
 
-                if ln1[i:i+len(color1)] == color1:
+                if show_color and ln1[i:i+len(color1)] == color1:
                     result += (color.end + color_both) if highlight2 else color1
                     highlight1 = True
                     i += len(color1)
                     continue
 
-                elif ln1[i:i+len(color.end)] == color.end:
+                elif show_color and ln1[i:i+len(color.end)] == color.end:
                     highlight1 = False
                     result += color.end
                     if highlight2: result += color2
@@ -369,13 +384,13 @@ def combine_colors(lines1, lines2, color1, color2, color_both):
             # add special characters from version 2
             if j < len(ln2):
 
-                if ln2[j:j+len(color2)] == color2:
+                if show_color and ln2[j:j+len(color2)] == color2:
                     result += (color.end + color_both) if highlight1 else color2
                     highlight2 = True
                     j += len(color2)
                     continue
 
-                elif ln2[j:j+len(color.end)] == color.end:
+                elif show_color and ln2[j:j+len(color.end)] == color.end:
                     highlight2 = False
                     result += color.end
                     if highlight1: result += color1
