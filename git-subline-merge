@@ -41,19 +41,16 @@ try:
 except ImportError:
     from distutils import strtobool
 
-# for colored output on Windows
-if os.name == 'nt':
-    from colorama import init
-
-
 
 #############
 ### SETUP ###
 #############
 
-MAX_HUNK_SIZE = 16
-MAX_HUNK_SIZE_DIFF = 8
-NON_INTERACTIVE_MODE = False
+WINDOWS = os.name is 'nt'
+
+# max hunk sizes
+MAX_HUNK_SIZE = int(os.getenv('GIT_SUBLINE_MERGE_MAX_HUNK_SIZE', 16))
+MAX_HUNK_SIZE_DIFF = int(os.getenv('GIT_SUBLINE_MERGE_MAX_HUNK_SIZE_DIFF', 8))
 
 # colors
 # don't use color if stdout is not a terminal or if it doesn't support at least 8-bit color
@@ -62,6 +59,28 @@ stdout_isatty = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
 term_colors = int(os.popen('which tput >/dev/null && tput colors').read() or 0)
 no_color = os.getenv('NO_COLOR') is not None
 show_color = stdout_isatty and term_colors >= 8 and not no_color
+
+# use colorama if available for colored terminal output on Windows
+if WINDOWS and show_color:
+    try:
+        from colorama import init
+        init()
+    except ImportError:
+        print('Install colorama (pip install colorama) for colored output on Windows.')
+        pass
+
+# interactive or non-interactive mode
+stdin_isatty = hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()
+interactive = not bool(strtobool(os.getenv('GIT_SUBLINE_MERGE_NON_INTERACTIVE_MODE', 'False')))
+
+if interactive and not stdin_isatty and not WINDOWS:
+    try:
+        sys.stdin = open('/dev/tty')
+    except IOError:
+        print('Warning: git-subline-merge could not run in interactive mode because there is no controlling terminal.\n'
+              'You can enable non-interactive mode using the GIT_SUBLINE_MERGE_NON_INTERACTIVE_MODE environment variable,\n'
+              '  however note that in this mode you will NOT be able to review merges before they are written to file.')
+        sys.exit(1)
 
 
 
@@ -142,11 +161,6 @@ def replace_nth_conflicted_hunk_with_lines(file, n, lines):
 # prompt user for input, repeating until one of the allowed responses is given
 def ask_for_input(msg, allowed=None):
 
-    # when run from git on *nix, stdin isn't connected to the terminal
-    # reconfigure stdin to prompt, then return it to its previous state
-    if os.name != 'nt':
-        sys.stdin = open('/dev/tty')
-
     if allowed is not None:
         msg = color.bold + color.info + msg + ' (' + '/'.join(allowed) + ')? ' + color.end
         while True:
@@ -157,13 +171,12 @@ def ask_for_input(msg, allowed=None):
         msg = color.bold + color.info + msg + color.end
         r = input(msg)
 
-    sys.stdin = sys.__stdin__
     return r
 
 # get exit status from a call to os.system
 # on Windows, os.WEXITSTATUS() doesn't work and os.system() returns the status directly
 def get_exit_status(exit_code):
-    return exit_code if (os.name == 'nt') else os.WEXITSTATUS(exit_code)
+    return exit_code if WINDOWS else os.WEXITSTATUS(exit_code)
 
 
 
@@ -424,9 +437,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
     sizes = [file_len(f) for f in hunk]
 
     # only process small hunks
-    max_size = int(os.getenv('GIT_SUBLINE_MERGE_MAX_HUNK_SIZE', MAX_HUNK_SIZE))
-    max_size_diff = int(os.getenv('GIT_SUBLINE_MERGE_MAX_HUNK_SIZE_DIFF', MAX_HUNK_SIZE_DIFF))
-    if all([s <= max_size for s in sizes]) and max(abs(sizes[0]-sizes[1]), abs(sizes[2]-sizes[1])) <= max_size_diff:
+    if all([s <= MAX_HUNK_SIZE for s in sizes]) and max(abs(sizes[0]-sizes[1]), abs(sizes[2]-sizes[1])) <= MAX_HUNK_SIZE_DIFF:
 
         # interactive mode
         if interactive:
@@ -608,19 +619,13 @@ def manual_merge_hunk(hunk):
     if editor is None: editor = os.getenv('EDITOR')
     if editor is None: editor = 'vi'
 
-    # when run from git on *nix, stdin isn't connected to the terminal
-    # this causes some editors (e.g. vi) to behave strangely, so we set it explicitly
-    windows = (os.name == 'nt')
-    stdin_var = None if windows else open('/dev/tty')
-    use_shell = False if windows else True
-
-    # known issue with vi on Mac OS X: can give nonzero exit status even when quit cleanly due to
-    # errors in .vimrc, so check its normal exit code first.
+    # known issue with vim on Mac OS X: can give nonzero exit status even when quit cleanly due to
+    #   errors in .vimrc, so check its normal exit code first.
     success_code = 0
     if editor == 'vi':
-        success_code = call(['vi -c "q" %s' % f.name], shell=use_shell, stdin=stdin_var)
+        success_code = call(['vi -c "q" %s' % f.name], shell=(not WINDOWS), stdin=sys.stdin)
 
-    status = call(['%s %s' % (editor, f.name)], shell=use_shell, stdin=stdin_var)
+    status = call(['%s %s' % (editor, f.name)], shell=(not WINDOWS), stdin=sys.stdin)
 
     # if editor returned without an error, return the saved lines
     result = None
@@ -636,10 +641,6 @@ def manual_merge_hunk(hunk):
 ############
 ### MAIN ###
 ############
-
-# initialize colorama for colored terminal output on Windows
-if os.name == 'nt':
-    init()
 
 # invoked by git
 if len(sys.argv) == 6:
@@ -718,9 +719,6 @@ else:
 if num_conflicts == 0:
     sys.exit(0)
 
-# interactive or non-interactive mode
-interactive = not bool(strtobool(os.getenv('GIT_SUBLINE_MERGE_NON_INTERACTIVE_MODE', str(NON_INTERACTIVE_MODE))))
-
 # welcome message
 if interactive:
     print(color.welcome + '\ngit-subline-merge v1.0\n' + color.end)
@@ -773,10 +771,6 @@ for h in hunk: h.close()
 newline = '\n' if interactive else ''
 col = color.success if resolved == num_conflicts else color.warning if resolved > 0 else color.error
 print(col + color.bold + newline + 'Resolved %d of %d conflicts in %s' % (resolved, num_conflicts, filename) + newline + color.end)
-
-# de-initialize colorama
-if os.name == 'nt':
-    deinit()
 
 # only exit with success if all conflicts were resolved
 sys.exit(0 if resolved == num_conflicts else 1)
