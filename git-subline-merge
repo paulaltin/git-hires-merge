@@ -646,14 +646,27 @@ if len(sys.argv) == 6:
     num_conflicts = get_exit_status(status)
 
 # invoked manually on a single file
-else:
+elif len(sys.argv) >= 2 and os.path.isfile(sys.argv[1]):
 
     # first argument is path to file
     current = sys.argv[1]
     filename = current
 
     # optional second argument for conflict marker size (default is 7 for <<<<<<<)
-    marker_len = int(sys.argv[2]) if len(sys.argv) == 3 else 7
+    try:
+        marker_len = int(sys.argv[2])
+    except ValueError:
+        print('Error: unable to read conflict marker size from argument "%s".' % (sys.argv[2]))
+        sys.exit(1)
+    except IndexError:
+        pass
+    finally:
+        marker_len = 7;
+
+    # extra arguments are ignored
+    if len(sys.argv) > 3:
+        print('Warning: ignoring extra arguments (%s).' % (', '.join(sys.argv[3:])))
+
     marker_start = '<' * marker_len
     marker_base = '|' * marker_len
     marker_other = '=' * marker_len
@@ -672,6 +685,14 @@ else:
     else:
         print('Badly formatted conflicts found in file. Possibly you need to change your conflictstyle to diff3?')
         sys.exit(1)
+
+# otherwise show help text
+else:
+
+    print("usage: git-subline-merge <file> [conflict-marker-size]\n"
+          "    <file>: path to file with conflicts (must be generated using diff3 style, see README)\n"
+          "    [conflict-marker-size] (optional): number of characters used in conflict markers (default 7)")
+    sys.exit(1)
 
 
 # sometimes (e.g. during interactive rebase) this script is called even though
