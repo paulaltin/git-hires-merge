@@ -90,8 +90,8 @@ If you are *really* confident that the subline merge will always do what you wan
 Tested with
 -----------
 - git version 2.15
-- Python 2.7 and 3
-- Mac OS X 10.12 and 10.13
+- Python 2.7 and 3.8
+- Mac OS X 10.12 - 10.15
 - Linux
 - Windows Subsystem for Linux
 

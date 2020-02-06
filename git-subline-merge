@@ -46,7 +46,7 @@ except ImportError:
 ### SETUP ###
 #############
 
-WINDOWS = os.name is 'nt'
+WINDOWS = os.name == 'nt'
 
 # max hunk sizes
 MAX_HUNK_SIZE = int(os.getenv('GIT_SUBLINE_MERGE_MAX_HUNK_SIZE', 16))
