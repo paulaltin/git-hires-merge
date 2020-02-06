@@ -41,6 +41,20 @@ Otherwise, if you want to use this script as a custom merge driver that Git will
 __Note to Python 2 users:__ this script uses the `future` package for Python 2 compatibility.  If you don't have this package you may get an error when trying to run the script (`ImportError: No module named builtin`). To fix this, simply install the `future` package using e.g. `pip install future`.
 
 
+Usage
+-----
+
+If you have set up `git-subline-merge` as a custom merge driver (see Installation), then you don't need to do anything - it will run automatically when a conflict happens during a merge or rebase.
+
+To invoke `git-subline-merge` manually on a conflicted file, just type:
+
+```
+    git-subline-merge /path/to/file
+```
+
+The conflicted file must have been generated using the `diff3` conflictstyle (see note below), and with the current conflict marker size setting (see gitattributes documentation).
+
+
 Features
 --------
 - Interactive resolution of conflicts on adjacent lines
