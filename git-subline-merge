@@ -740,7 +740,9 @@ for line in tmp:
     # beginning of conflict zone
     if line.startswith(marker_start):
         zone = 1
-        for f in hunk: f.truncate(0)
+        for f in hunk: 
+            f.truncate(0)
+            f.seek(0)
 
     # base version of conflict
     elif line.startswith(marker_base):
