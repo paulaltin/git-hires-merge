@@ -23,10 +23,10 @@ If you just want to run this script manually on conflicted files, then stop here
 
 Otherwise, if you want to use this script as a custom merge driver that Git will call automatically when a merge or rebase operation hits a conflict, then continue on:
 
-* Step 2: add these lines to your `~/.gitconfig`:
+* Step 2: add these lines to your `~/.gitconfig`: 
 
 ```
-    [merge "git-subline-merge"]
+    [merge "git-subline-merge"] 
         name = An interactive merge driver for resolving sub-line conflicts
         driver = git-subline-merge %O %A %B %L %P
         recursive = binary
