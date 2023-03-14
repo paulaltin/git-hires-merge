@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-
-#
+#!/usr/bin/env sh
+# -*- mode: python; -*-
 #  git-subline-merge
 #
 #  Created by Paul Altin on 02.03.18.
@@ -23,7 +22,12 @@
 # Alternatively, run this script on a conflicted file using 'git-subline-merge /path/to/file'
 #
 
-
+# Use python3 if it is found, and the system python otherwise. Use with Python2 depends on the 'future' package.  The triple-quote hack makes the entire file valid Python
+''':'
+# This part is executed by sh
+PYTHON=$(type python3 > /dev/null 2>&1 && echo python3 || echo python)
+cat<<'#EOF' | /usr/bin/env $PYTHON - "$@"
+'''#'''
 import os, sys, re, tempfile
 from subprocess import call
 from shutil import copyfile
@@ -777,3 +781,4 @@ print(col + color.bold + newline + 'Resolved %d of %d conflicts in %s' % (resolv
 # only exit with success if all conflicts were resolved
 sys.exit(0 if resolved == num_conflicts else 1)
 
+#EOF
