@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#! /bin/sh
+# -*- mode: python; coding: utf-8 -*-
 
 #
 #  git-subline-merge
@@ -24,6 +25,19 @@
 #
 
 
+# This file is used as both a shell script and as a Python script.
+
+""":"
+# This part is run by the shell.
+# It decides the name of the python executable, then runs that interpreter on this script.
+# Use python3 if it is found, and the system python otherwise.
+# This is necessary for the script to work on a default macOS install.
+# Use with python2 depends on the 'future' package.
+PYTHON=$(type python3 > /dev/null 2>&1 && echo python3 || echo python)
+exec $PYTHON "$0" "$@"
+" """
+
+# The rest of the file is run by the Python interpreter.
 import os, sys, re, tempfile
 from subprocess import call
 from shutil import copyfile
