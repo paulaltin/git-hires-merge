@@ -745,7 +745,7 @@ if num_conflicts == 0:
 # colored diffs currently require GNU-based diff
 # BSD-based diff bundled with macOS >= 13 don't support format options
 # TODO: can we do colored diffs without these options?
-diff_exit_code = os.system('diff --old-group-format="" --new-group-format="" --changed-group-format="" --unchanged-group-format="" <(echo "a") <(echo "a")')
+diff_exit_code = os.system('echo "a" | diff --old-group-format="" --new-group-format="" --changed-group-format="" --unchanged-group-format="" - - >/dev/null 2>&1')
 USE_COLORED_DIFF = (diff_exit_code == 0)
 
 # welcome message
