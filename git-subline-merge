@@ -210,7 +210,16 @@ def get_exit_status(exit_code):
 # we take the diff with both versions and combine them by keeping all color codes
 def print_formatted_diff(hunk, display):
 
-    if display == 'current' or display == 'other':
+    if not USE_COLORED_DIFF:
+
+        index = ['current', 'base', 'other'].index(display)
+        hunk[index].seek(0)
+        lines = hunk[index].read().splitlines();
+
+        for ln in lines:
+            print(ln)
+
+    elif display == 'current' or display == 'other':
 
         old = hunk[1]
         new = hunk[0] if display == 'current' else hunk[2]
@@ -732,6 +741,12 @@ else:
 # there are no conflicts - in that case just exit successfully here
 if num_conflicts == 0:
     sys.exit(0)
+
+# colored diffs currently require GNU-based diff
+# BSD-based diff bundled with macOS >= 13 don't support format options
+# TODO: can we do colored diffs without these options?
+diff_exit_code = os.system('diff --old-group-format="" --new-group-format="" --changed-group-format="" --unchanged-group-format="" <(echo "a") <(echo "a")')
+USE_COLORED_DIFF = (diff_exit_code == 0)
 
 # welcome message
 if interactive:
