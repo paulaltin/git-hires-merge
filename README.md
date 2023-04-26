@@ -38,6 +38,8 @@ Otherwise, if you want to use this script as a custom merge driver that Git will
     * merge=git-subline-merge
 ```
 
+__Note to macOS users:__ Diff coloring does not work on a default install of macOS version 13 or higher, because the BSD-based diff utility does not support the required formatting options. Install GNU diffutils via Homebrew or MacPorts to get colored diffs.
+
 __Note to Python 2 users:__ this script uses the `future` package for Python 2 compatibility.  If you don't have this package you may get an error when trying to run the script (`ImportError: No module named builtin`). To fix this, simply install the `future` package using e.g. `pip install future`.
 
 
