@@ -2,7 +2,7 @@
 # -*- mode: python; coding: utf-8 -*-
 
 #
-#  git-subline-merge
+#  git-hires-merge
 #
 #  Created by Paul Altin on 02.03.18.
 #
@@ -12,16 +12,16 @@
 #
 # To install for use during merge/rebase, place this script somewhere on your path, add these lines to your ~/.gitconfig:
 #
-#     [merge "git-subline-merge"]
-#         name = An interactive merge driver for resolving sub-line conflicts
-#         driver = git-subline-merge %O %A %B %L %P
+#     [merge "git-hires-merge"]
+#         name = An interactive merge driver for resolving conflicts on individual or adjacent lines
+#         driver = git-hires-merge %O %A %B %L %P
 #         recursive = binary
 #
 # and this to your git attributes file (e.g. ~/.config/git/attributes):
 #
-#     * merge=git-subline-merge
+#     * merge=git-hires-merge
 #
-# Alternatively, run this script on a conflicted file using 'git-subline-merge /path/to/file'
+# Alternatively, run this script on a conflicted file using 'git-hires-merge /path/to/file'
 #
 
 
@@ -63,8 +63,8 @@ except ImportError:
 WINDOWS = os.name == 'nt'
 
 # max hunk sizes
-MAX_HUNK_SIZE = int(os.getenv('GIT_SUBLINE_MERGE_MAX_HUNK_SIZE', 16))
-MAX_HUNK_SIZE_DIFF = int(os.getenv('GIT_SUBLINE_MERGE_MAX_HUNK_SIZE_DIFF', 8))
+MAX_HUNK_SIZE = int(os.getenv('GIT_HIRES_MERGE_MAX_HUNK_SIZE', 16))
+MAX_HUNK_SIZE_DIFF = int(os.getenv('GIT_HIRES_MERGE_MAX_HUNK_SIZE_DIFF', 8))
 
 # colors
 # don't use color if stdout is not a terminal or if it doesn't support at least 8-bit color
@@ -85,14 +85,14 @@ if WINDOWS and show_color:
 
 # interactive or non-interactive mode
 stdin_isatty = hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()
-interactive = not bool(strtobool(os.getenv('GIT_SUBLINE_MERGE_NON_INTERACTIVE_MODE', 'False')))
+interactive = not bool(strtobool(os.getenv('GIT_HIRES_MERGE_NON_INTERACTIVE_MODE', 'False')))
 
 if interactive and not stdin_isatty and not WINDOWS:
     try:
         sys.stdin = open('/dev/tty')
     except IOError:
-        print('Warning: git-subline-merge could not run in interactive mode because there is no controlling terminal.\n'
-              'You can enable non-interactive mode using the GIT_SUBLINE_MERGE_NON_INTERACTIVE_MODE environment variable,\n'
+        print('Warning: git-hires-merge could not run in interactive mode because there is no controlling terminal.\n'
+              'You can enable non-interactive mode using the GIT_HIRES_MERGE_NON_INTERACTIVE_MODE environment variable,\n'
               '  however note that in this mode you will NOT be able to review merges before they are written to file.')
         sys.exit(1)
 
@@ -256,7 +256,7 @@ def format_diff(fold, fnew, display, color_added, color_deleted):
     # for added and deleted groups, get the (zero-indexed) number of the first line and the length of the group
     # for changed groups, get the (zero-indexed) numbers of the first and one past the last line
     # ideally we'd use \n as the delimiter, but these break the shell on Windows
-    delimiter = marker_start + "GIT_SUBLINE_MERGE_DELIMITER" + marker_end
+    delimiter = marker_start + "GIT_HIRES_MERGE_DELIMITER" + marker_end
     oldformat = ' --old-group-format="D%de+%dn,%dE+%dN' + delimiter + '" '
     newformat = ' --new-group-format="A%de+%dn,%dE+%dN' + delimiter + '" '
     changedformat = ' --changed-group-format="C%de+%dl,%dE+%dL' + delimiter + '" '
@@ -480,7 +480,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                     print('')
                     print(color.bold + '   v - view entire hunk' + color.end)
                     print(color.bold + '   x - view hunk in context' + color.end)
-                    print(color.bold + '   s - attempt sub-line merge' + color.end)
+                    print(color.bold + '   s - attempt hi-res merge' + color.end)
                     print(color.bold + '   m - resolve manually' + color.end)
                     print(color.bold + '   c - use current version' + color.end)
                     print(color.bold + '   b - use base version' + color.end)
@@ -516,13 +516,13 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                             elif i >= stop:
                                 break
                 elif action == 's':
-                    result = subline_merge_hunk(hunk)
+                    result = hires_merge_hunk(hunk)
                     if result is not None:
-                        print(color.info + marker_start + ' Sub-line merge yields:' + color.end)
+                        print(color.info + marker_start + ' Hi-res merge yields:' + color.end)
                         if len(result):
                             print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
                         print(color.info + marker_end + color.end + '\n')
-                        accept = ask_for_input('Accept (or edit) sub-line merge', ['y','n','e'])
+                        accept = ask_for_input('Accept (or edit) hi-res merge', ['y','n','e'])
                         if accept == 'y':
                             replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
                             fixed = True
@@ -531,7 +531,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                             print('')
                             result = edit_text(''.join(result))
                             if result is not None:
-                                print(color.info + marker_start + ' Edited sub-line merge resolution is:' + color.end)
+                                print(color.info + marker_start + ' Edited hi-res merge resolution is:' + color.end)
                                 if len(result):
                                     print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
                                 print(color.info + marker_end + color.end + '\n')
@@ -544,7 +544,7 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                             else:
                                 print(color.bold + color.warning + 'User cancelled manual resolve' + color.end)
                     else:
-                        print(color.bold + color.error + 'Sub-line merge failed, hunk has overlapping changes' + color.end)
+                        print(color.bold + color.error + 'Hi-res merge failed, hunk has overlapping changes' + color.end)
                 elif action == 'm':
                     result = manual_merge_hunk(hunk)
                     if result is not None:
@@ -586,16 +586,16 @@ def process_hunk(hunk, index, resolved, num_conflicts):
         else:
 
             for f in hunk: f.seek(0)
-            result = subline_merge_hunk(hunk)
+            result = hires_merge_hunk(hunk)
             if result is not None:
                 replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
-                print(color.bold + color.success + 'git-subline-merge resolved conflict %d of %d in %s, resulting hunk was:' % (index, num_conflicts, filename) + color.end)
+                print(color.bold + color.success + 'git-hires-merge resolved conflict %d of %d in %s, resulting hunk was:' % (index, num_conflicts, filename) + color.end)
                 print(color.info + marker_start + color.end)
                 if len(result): print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
                 print(color.info + marker_end + color.end)
                 fixed = True
             else:
-                print(color.bold + color.error + 'git-subline-merge failed to resolve conflict %d of %d in %s, hunk has overlapping changes' % (index, num_conflicts, filename) + color.end)
+                print(color.bold + color.error + 'git-hires-merge failed to resolve conflict %d of %d in %s, hunk has overlapping changes' % (index, num_conflicts, filename) + color.end)
 
 
     # hunk too large
@@ -605,8 +605,8 @@ def process_hunk(hunk, index, resolved, num_conflicts):
     return fixed, abort
 
 
-# attempt to do sub-line merging of a conflicted hunk
-def subline_merge_hunk(hunk):
+# attempt to do hi-res merging of a conflicted hunk
+def hires_merge_hunk(hunk):
 
     result = None
     fs = [None, None, None]
@@ -753,7 +753,7 @@ elif len(sys.argv) >= 2 and os.path.isfile(sys.argv[1]):
 # otherwise show help text
 else:
 
-    print("usage: git-subline-merge <file> [conflict-marker-size]\n"
+    print("usage: git-hires-merge <file> [conflict-marker-size]\n"
           "    <file>: path to file with conflicts (must be generated using diff3 style, see README)\n"
           "    [conflict-marker-size] (optional): number of characters used in conflict markers (default 7)")
     sys.exit(1)
@@ -772,7 +772,7 @@ USE_COLORED_DIFF = (diff_exit_code == 0)
 
 # welcome message
 if interactive:
-    print(color.welcome + '\ngit-subline-merge v1.0\n' + color.end)
+    print(color.welcome + '\ngit-hires-merge v1.0\n' + color.end)
 
 # make temporary files
 # one is a copy of the conflicted 'current', to iterate with

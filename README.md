@@ -1,4 +1,4 @@
-git-subline-merge
+git-hires-merge
 =================
 
 An interactive Git merge driver which can resolve non-overlapping conflicts on individual or adjacent lines.
@@ -10,9 +10,9 @@ Git's default merge strategy will throw a conflict whenever two branches make ch
 
 However, sometimes you wish that Git would just try to merge those conflicting lines anyway.
 
-Enter `git-subline-merge`:
+Enter `git-hires-merge`:
 
-![git-subline-merge-example](https://raw.githubusercontent.com/paulaltin/git-subline-merge/master/example.png)
+![git-hires-merge-example](https://raw.githubusercontent.com/paulaltin/git-hires-merge/master/example.jpg)
 
 
 Installation
@@ -26,16 +26,16 @@ Otherwise, if you want to use this script as a custom merge driver that Git will
 * Step 2: add these lines to your `~/.gitconfig`:
 
 ```
-    [merge "git-subline-merge"]
-        name = An interactive merge driver for resolving sub-line conflicts
-        driver = git-subline-merge %O %A %B %L %P
+    [merge "git-hires-merge"]
+        name = An interactive merge driver for resolving conflicts on individual or adjacent lines
+        driver = git-hires-merge %O %A %B %L %P
         recursive = binary
 ```
 
 * Step 3: add this line to your git-attributes file (e.g. `$HOME/.config/git/attributes` or `$GIT_DIR/info/attributes`):
 
 ```
-    * merge=git-subline-merge
+    * merge=git-hires-merge
 ```
 
 __Note to macOS users:__ Diff coloring does not work on a default install of macOS version 13 or higher, because the BSD-based diff utility does not support the required formatting options. Install GNU diffutils via Homebrew or MacPorts to get colored diffs.
@@ -46,12 +46,12 @@ __Note to Python 2 users:__ this script uses the `future` package for Python 2 c
 Usage
 -----
 
-If you have set up `git-subline-merge` as a custom merge driver (see Installation), then you don't need to do anything - it will run automatically when a conflict happens during a merge or rebase.
+If you have set up `git-hires-merge` as a custom merge driver (see Installation), then you don't need to do anything - it will run automatically when a conflict happens during a merge or rebase.
 
-To invoke `git-subline-merge` manually on a conflicted file, just type:
+To invoke `git-hires-merge` manually on a conflicted file, just type:
 
 ```
-    git-subline-merge /path/to/file
+    git-hires-merge /path/to/file
 ```
 
 The conflicted file must have been generated using the `diff3` conflictstyle (see note below), and with the current conflict marker size setting (see gitattributes documentation).
@@ -73,7 +73,7 @@ If you run this script manually on a conflicted file, you may encounter an error
 
 By default, Git leaves the two new versions of a conflicted hunk in the file, surrounded by conflict markers `<<<<<<<`, `=======` and `>>>>>>>`. However, to figure out how to resolve the conflict it's often necessary to know the original version, to see what changes were made on each branch. This is what `diff3` does. Once you have `diff3` turned on, you will see a third section beginning with `|||||||` in each conflict, which shows the "common ancestor" version of the hunk. Since you often need the ancestor to determine what the correct merge is, this feature is so useful that a lot of people (including me) think it should be the default.
 
-In any case, `git-subline-merge` needs the common ancestor version to resolve conflicts, so it can only be run manually on conflicted files which were created using `diff3`.
+In any case, `git-hires-merge` needs the common ancestor version to resolve conflicts, so it can only be run manually on conflicted files which were created using `diff3`.
 
 To enable the `diff3` conflictstyle, simply run this command
 
@@ -92,15 +92,15 @@ This is done using the simplest, most brute-force approach imaginable: we split 
 
 Advanced options
 ----------------
-In general, a sub-line merge is less likely to succeed the larger the conflicted hunk is, and the larger the difference in size between the original ('base') version and the two new versions ('current' and 'other').
+In general, a hi-res merge is less likely to succeed the larger the conflicted hunk is, and the larger the difference in size between the original ('base') version and the two new versions ('current' and 'other').
 
-If you find that `git-subline-merge` is stopping too often on conflicted hunks that it can't resolve, or skipping too many that it could have resolved, you can tune the `MAX_HUNK_SIZE` and `MAX_HUNK_SIZE_DIFF` constants to control which hunks are processed and which are skipped. These constants are found at the top of the script, or they can be set using environment variables `GIT_SUBLINE_MERGE_MAX_HUNK_SIZE` and `GIT_SUBLINE_MERGE_MAX_HUNK_SIZE_DIFF`.
+If you find that `git-hires-merge` is stopping too often on conflicted hunks that it can't resolve, or skipping too many that it could have resolved, you can tune the `MAX_HUNK_SIZE` and `MAX_HUNK_SIZE_DIFF` constants to control which hunks are processed and which are skipped. These constants are found at the top of the script, or they can be set using environment variables `GIT_HIRES_MERGE_MAX_HUNK_SIZE` and `GIT_HIRES_MERGE_MAX_HUNK_SIZE_DIFF`.
 
 The default values are `MAX_HUNK_SIZE = 16` and `MAX_HUNK_SIZE_DIFF = 8`, which means that conflicts spanning more than 16 lines, or whose versions differ by more than 8 lines, will be skipped. For example, a conflict which spans `12/14/14` lines in the current, base and other versions will be processed, but a conflict which spans `6/8/15` lines will be skipped.
 
 The optimal values of these constants will depend on what kind of text you are merging, so the best thing to do is to experiment until you find values that work well for your situation.
 
-If you are *really* confident that the subline merge will always do what you want, you can let `git-subline-merge` run automatically by setting `NON_INTERACTIVE_MODE` to `True` (or by setting the `GIT_SUBLINE_MERGE_NON_INTERACTIVE_MODE` environment variable). In this case, the script will try to merge conflicted hunks without asking for confirmation, leaving those that cannot be merged. However, this is strongly discouraged in most situations as it is likely to lead to erroneous merges. Use this only for predictable and repeatable conflicts which are known to merge successfully.
+If you are *really* confident that the hi-res merge will always do what you want, you can let `git-hires-merge` run automatically by setting `NON_INTERACTIVE_MODE` to `True` (or by setting the `GIT_HIRES_MERGE_NON_INTERACTIVE_MODE` environment variable). In this case, the script will try to merge conflicted hunks without asking for confirmation, leaving those that cannot be merged. However, this is strongly discouraged in most situations as it is likely to lead to erroneous merges. Use this only for predictable and repeatable conflicts which are known to merge successfully.
 
 
 Tested with
