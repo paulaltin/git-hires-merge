@@ -522,12 +522,27 @@ def process_hunk(hunk, index, resolved, num_conflicts):
                         if len(result):
                             print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
                         print(color.info + marker_end + color.end + '\n')
-                        accept = ask_for_input('Accept sub-line merge', ['y','n'])
-                        success = True if accept == 'y' else False
-                        if (success):
+                        accept = ask_for_input('Accept (or edit) sub-line merge', ['y','n','e'])
+                        if accept == 'y':
                             replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
                             fixed = True
                             break
+                        elif accept == 'e':
+                            print('')
+                            result = edit_text(''.join(result))
+                            if result is not None:
+                                print(color.info + marker_start + ' Edited sub-line merge resolution is:' + color.end)
+                                if len(result):
+                                    print('\n'.join([x.rstrip('\n') for x in result]).rstrip('\n'))
+                                print(color.info + marker_end + color.end + '\n')
+                                accept = ask_for_input('Accept resolution', ['y','n'])
+                                success = True if accept == 'y' else False
+                                if (success):
+                                    replace_nth_conflicted_hunk_with_lines(current, index-resolved, result)
+                                    fixed = True
+                                    break
+                            else:
+                                print(color.bold + color.warning + 'User cancelled manual resolve' + color.end)
                     else:
                         print(color.bold + color.error + 'Sub-line merge failed, hunk has overlapping changes' + color.end)
                 elif action == 'm':
@@ -621,18 +636,12 @@ def subline_merge_hunk(hunk):
     return result
 
 
-# open an editor for manual merging of a conflicted hunk
-def manual_merge_hunk(hunk):
+# open an editor for user to edit provided text
+def edit_text(text):
 
     # prepare temp file for editing
     f = tempfile.NamedTemporaryFile(mode='w+', delete=False)
-    f.write(marker_start + ' Current version is:\n')
-    f.write(hunk[0].read())
-    f.write(marker_base + ' Base version is:\n')
-    f.write(hunk[1].read())
-    f.write(marker_other + ' Other version is:\n')
-    f.write(hunk[2].read())
-    f.write(marker_end + '\n')
+    f.write(text)
     f.close()
 
     # imitate the process that Git uses to determine which editor to use
@@ -658,6 +667,19 @@ def manual_merge_hunk(hunk):
     os.unlink(f.name)
 
     return result
+
+
+# open an editor for manual merging of a conflicted hunk
+def manual_merge_hunk(hunk):
+
+    # text to edit
+    text = marker_start + ' Current version is:\n' + hunk[0].read()
+    text += marker_base + ' Base version is:\n' + hunk[1].read()
+    text += marker_other + ' Other version is:\n' + hunk[2].read()
+    text += marker_end + '\n'
+
+    # open editor
+    return edit_text(text)
 
 
 
