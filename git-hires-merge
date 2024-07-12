@@ -336,11 +336,11 @@ def format_changed_hunk(h1, h2, display, color_added, color_deleted):
     # keep track of where the linebreaks are in terms of segment index
     splA, splB, lcA, lcB = [], [], [0], [0]
     for ln in h1:
-        segments = re.split('(\W)', ln)
+        segments = re.split(r'(\W)', ln)
         splA += segments
         lcA.append(lcA[-1] + len(segments))
     for ln in h2:
-        segments = re.split('(\W)', ln)
+        segments = re.split(r'(\W)', ln)
         splB += segments
         lcB.append(lcB[-1] + len(segments))
     lcA.pop(0)
