@@ -692,6 +692,26 @@ def manual_merge_hunk(hunk):
 
 
 
+#############
+### FILES ###
+#############
+
+# count the conflicts in a file by counting its conflict markers
+# returns None if the numbers of each kind of marker don't match, in which case the conflicts
+#   were probably not generated using diff3 and we can't resolve them without the base version
+def count_conflicts(path):
+    markers = [marker_start, marker_base, marker_other, marker_end]
+    counts = [0, 0, 0, 0]
+    with open(path, 'r') as f:
+        for line in f:
+            for i, marker in enumerate(markers):
+                if line.startswith(marker):
+                    counts[i] += 1
+                    break
+    return counts[0] if counts.count(counts[0]) == len(counts) else None
+
+
+
 ############
 ### MAIN ###
 ############
@@ -744,18 +764,16 @@ elif len(sys.argv) >= 2 and os.path.isfile(sys.argv[1]):
     marker_other = '=' * marker_len
     marker_end = '>' * marker_len
 
-    # use grep to find number of conflicts in the file
-    num_start = int(os.popen('grep -c "^%s" "%s"' % (marker_start, current)).read())
-    num_base = int(os.popen('grep -c "^%s" "%s"' % (marker_base, current)).read())
-    num_other = int(os.popen('grep -c "^%s" "%s"' % (marker_other, current)).read())
-    num_end = int(os.popen('grep -c "^%s" "%s"' % (marker_end, current)).read())
+    # count the conflicts in the file
+    try:
+        num_conflicts = count_conflicts(current)
+    except (IOError, UnicodeDecodeError) as e:
+        print(color.bold + color.error + 'Error: could not read %s (%s).' % (current, e) + color.end)
+        sys.exit(1)
 
-    # check that the number of conflict markers match
-    # if they don't, probably the merge wasn't generated using diff3, and we can't resolve conflicts without the base version
-    if num_start == num_base == num_other == num_end:
-        num_conflicts = num_start
-    else:
-        print('Badly formatted conflicts found in file. Possibly you need to change your conflictstyle to diff3?')
+    # if the numbers of markers don't match, probably the merge wasn't generated using diff3
+    if num_conflicts is None:
+        print(color.bold + color.error + 'Badly formatted conflicts found in %s. Possibly you need to change your conflictstyle to diff3?' % current + color.end)
         sys.exit(1)
 
 # otherwise show help text
