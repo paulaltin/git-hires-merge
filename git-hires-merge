@@ -21,7 +21,8 @@
 #
 #     * merge=git-hires-merge
 #
-# Alternatively, run this script on a conflicted file using 'git-hires-merge /path/to/file'
+# Alternatively, run this script manually using 'git-hires-merge [<pathspec>...]'. With no arguments, it runs
+# on the sole unmerged file in the repository. With pathspecs, it runs on all unmerged files that match them.
 #
 
 
@@ -39,7 +40,7 @@ exec $PYTHON "$0" "$@"
 
 # The rest of the file is run by the Python interpreter.
 import os, sys, re, tempfile, argparse
-from subprocess import call
+from subprocess import call, check_output, CalledProcessError
 from shutil import copyfile
 from builtins import input
 
@@ -721,6 +722,86 @@ def count_conflicts(path):
     return counts[0] if counts.count(counts[0]) == len(counts) else None
 
 
+# get the unmerged paths in the index which match the given pathspecs
+# paths are relative to the current directory, in index order, without duplicates
+# returns None if we are not inside a git repository
+def unmerged_paths(pathspecs):
+    with open(os.devnull, 'w') as devnull:
+        try:
+            out = check_output(['git', 'ls-files', '--unmerged', '-z', '--'] + list(pathspecs), stderr=devnull)
+        except (CalledProcessError, OSError):
+            return None
+    if not isinstance(out, str):
+        out = out.decode(sys.getfilesystemencoding() or 'utf-8', 'surrogateescape')
+    paths = []
+    for entry in out.split('\0'):
+        # each entry looks like '<mode> <object> <stage>\t<path>'
+        if not entry: continue
+        path = entry.split('\t', 1)[1]
+        if path not in paths: paths.append(path)
+    return paths
+
+
+# work out which files to process from the pathspecs given on the command line
+# inside a git repository, the pathspecs select unmerged files, like they do for 'git checkout --conflict'
+#   with no pathspecs, the sole unmerged file in the repository is selected
+#   an argument which names an existing file is accepted even if that file is not unmerged
+# outside a git repository, the arguments are plain file paths
+# returns the list of files and the number of errors (e.g. pathspecs which matched nothing)
+# exits with an error message if no files can be found
+def find_files(pathspecs):
+
+    errors = 0
+
+    unmerged = unmerged_paths(pathspecs or [':/'])
+
+    # not inside a git repository
+    if unmerged is None:
+        if not pathspecs:
+            print(color.bold + color.error + 'Error: not inside a git repository, so a file to process must be given.' + color.end)
+            sys.exit(1)
+        files = []
+        for p in pathspecs:
+            if os.path.isfile(p):
+                files.append(p)
+            else:
+                print(color.bold + color.error + 'Error: "%s" is not a file, skipping.' % p + color.end)
+                errors += 1
+
+    # no pathspecs: default to the sole unmerged file
+    elif not pathspecs:
+        if len(unmerged) == 0:
+            print(color.bold + color.error + 'Error: there are no unmerged files in this repository.' + color.end)
+            sys.exit(1)
+        elif len(unmerged) > 1:
+            print(color.bold + color.error + 'Error: there are %d unmerged files in this repository, specify which to process:' % len(unmerged) + color.end)
+            for p in unmerged: print('    ' + p)
+            print('(use "git-hires-merge ." to process all unmerged files below the current directory)')
+            sys.exit(1)
+        files = unmerged
+
+    # pathspecs given: use the unmerged files matching them
+    # also accept any argument which names an existing file, e.g. a conflicted file which is not in the index
+    else:
+        files = list(unmerged)
+        found = set(os.path.realpath(p) for p in files)
+        for p in pathspecs:
+            if os.path.realpath(p) in found:
+                continue
+            elif os.path.isfile(p):
+                files.append(p)
+                found.add(os.path.realpath(p))
+            elif len(unmerged_paths([p]) or []) == 0:
+                print(color.bold + color.error + 'Error: pathspec "%s" did not match any unmerged files.' % p + color.end)
+                errors += 1
+
+    if not files:
+        print(color.bold + color.error + 'Error: no files to process.' + color.end)
+        sys.exit(1)
+
+    return files, errors
+
+
 # resolve the conflicts in one file
 # current is the path to the file containing the conflicts, which is modified in place
 # filename is the name shown to the user (differs from current when git invokes us as a merge driver)
@@ -785,16 +866,20 @@ def process_file(current, filename, num_conflicts):
 ### MAIN ###
 ############
 
-# invoked by git
-if len(sys.argv) == 6:
+# list of (current, filename, num_conflicts) to process, and number of errors found while looking for them
+files = []
+errors = 0
 
-    # arguments passed in by git:
-    # [1] name of temp file containing base version of file
-    # [2] name of temp file containing current version of file
-    # [3] name of temp file containing other version of file
-    # [4] length of conflict markers (default is 7 for <<<<<<<)
-    # [5] name of conflicted file
-    # the result should be left in the current version (argv[2])
+# invoked by git as a merge driver
+# arguments passed in by git:
+# [1] name of temp file containing base version of file
+# [2] name of temp file containing current version of file
+# [3] name of temp file containing other version of file
+# [4] length of conflict markers (default is 7 for <<<<<<<)
+# [5] name of conflicted file
+# the result should be left in the current version (argv[2])
+if len(sys.argv) == 6 and sys.argv[4].isdigit() and all(os.path.isfile(a) for a in sys.argv[1:4]):
+
     base, current, other, marker_len, filename = sys.argv[1:]
     marker_len = int(marker_len)
     set_markers(marker_len)
@@ -804,41 +889,50 @@ if len(sys.argv) == 6:
     status = os.system('git merge-file --diff3 --marker-size=%d -L "Current version" -L "Base version" -L "Other version" %s %s %s' % (marker_len, current, base, other))
     num_conflicts = get_exit_status(status)
 
+    # sometimes (e.g. during interactive rebase) this script is called even though
+    # there are no conflicts - in that case just exit successfully here
+    if num_conflicts == 0:
+        sys.exit(0)
+
+    files.append((current, filename, num_conflicts))
+
 # invoked manually
 else:
 
     parser = argparse.ArgumentParser(prog='git-hires-merge',
         description='Resolve non-overlapping conflicts on individual or adjacent lines.',
-        epilog='Conflicts must have been generated using the diff3 conflictstyle (see README).')
-    parser.add_argument('file', help='path to a conflicted file')
+        epilog='Conflicts must have been generated using the diff3 conflictstyle (see README). '
+               'Inside a git repository, the pathspecs select unmerged files. With no pathspec, '
+               'the sole unmerged file in the repository is processed.')
+    parser.add_argument('pathspec', nargs='*',
+        help='unmerged files to process, e.g. "." or "*.cfg" (or a path to a conflicted file)')
     parser.add_argument('-m', '--marker-size', type=int, default=7, metavar='N',
         help='number of characters used in conflict markers (default 7)')
     args = parser.parse_args()
 
-    current = filename = args.file
     set_markers(args.marker_size)
 
-    if not os.path.isfile(current):
-        print(color.bold + color.error + 'Error: "%s" is not a file.' % current + color.end)
-        sys.exit(1)
+    paths, errors = find_files(args.pathspec)
+    for path in paths:
+        try:
+            num_conflicts = count_conflicts(path)
+        except (IOError, UnicodeDecodeError) as e:
+            print(color.bold + color.error + 'Error: could not read %s (%s), skipping.' % (path, e) + color.end)
+            errors += 1
+            continue
+        # if the numbers of markers don't match, probably the merge wasn't generated using diff3
+        if num_conflicts is None:
+            print(color.bold + color.error + 'Badly formatted conflicts found in %s. Possibly you need to change your conflictstyle to diff3?' % path + color.end)
+            errors += 1
+        elif num_conflicts == 0:
+            print(color.bold + color.info + 'No conflicts found in %s' % path + color.end)
+        else:
+            files.append((path, path, num_conflicts))
 
-    # count the conflicts in the file
-    try:
-        num_conflicts = count_conflicts(current)
-    except (IOError, UnicodeDecodeError) as e:
-        print(color.bold + color.error + 'Error: could not read %s (%s).' % (current, e) + color.end)
-        sys.exit(1)
+    # nothing to do
+    if not files:
+        sys.exit(1 if errors else 0)
 
-    # if the numbers of markers don't match, probably the merge wasn't generated using diff3
-    if num_conflicts is None:
-        print(color.bold + color.error + 'Badly formatted conflicts found in %s. Possibly you need to change your conflictstyle to diff3?' % current + color.end)
-        sys.exit(1)
-
-
-# sometimes (e.g. during interactive rebase) this script is called even though
-# there are no conflicts - in that case just exit successfully here
-if num_conflicts == 0:
-    sys.exit(0)
 
 # colored diffs currently require GNU-based diff
 # BSD-based diff bundled with macOS >= 13 don't support format options
@@ -850,8 +944,17 @@ USE_COLORED_DIFF = (diff_exit_code == 0)
 if interactive:
     print(color.welcome + '\ngit-hires-merge v1.0\n' + color.end)
 
-# process the file
-resolved = process_file(current, filename, num_conflicts)
+# process each file in turn
+total_resolved = total_conflicts = 0
+for current, filename, num_conflicts in files:
+    total_resolved += process_file(current, filename, num_conflicts)
+    total_conflicts += num_conflicts
 
-# only exit with success if all conflicts were resolved
-sys.exit(0 if resolved == num_conflicts else 1)
+# print overall resolution if there was more than one file
+if len(files) > 1:
+    newline = '\n' if interactive else ''
+    col = color.success if total_resolved == total_conflicts else color.warning if total_resolved > 0 else color.error
+    print(col + color.bold + newline + 'Resolved %d of %d conflicts in %d files' % (total_resolved, total_conflicts, len(files)) + newline + color.end)
+
+# only exit with success if all conflicts were resolved and no errors occurred
+sys.exit(0 if total_resolved == total_conflicts and errors == 0 else 1)
