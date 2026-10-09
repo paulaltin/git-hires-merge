@@ -460,7 +460,8 @@ def combine_colors(lines1, lines2, color1, color2, color_both):
 ### MERGING ###
 ###############
 
-def process_hunk(hunk, index, resolved, num_conflicts):
+# current is the path to the file containing the conflicts, filename is the name shown to the user
+def process_hunk(hunk, index, resolved, num_conflicts, current, filename):
 
     first_run = True
     fixed = abort = False
@@ -696,6 +697,15 @@ def manual_merge_hunk(hunk):
 ### FILES ###
 #############
 
+# set the conflict markers for the given marker size (default is 7 for <<<<<<<)
+def set_markers(marker_len):
+    global marker_start, marker_base, marker_other, marker_end
+    marker_start = '<' * marker_len
+    marker_base = '|' * marker_len
+    marker_other = '=' * marker_len
+    marker_end = '>' * marker_len
+
+
 # count the conflicts in a file by counting its conflict markers
 # returns None if the numbers of each kind of marker don't match, in which case the conflicts
 #   were probably not generated using diff3 and we can't resolve them without the base version
@@ -709,6 +719,65 @@ def count_conflicts(path):
                     counts[i] += 1
                     break
     return counts[0] if counts.count(counts[0]) == len(counts) else None
+
+
+# resolve the conflicts in one file
+# current is the path to the file containing the conflicts, which is modified in place
+# filename is the name shown to the user (differs from current when git invokes us as a merge driver)
+# returns the number of conflicts which were resolved
+def process_file(current, filename, num_conflicts):
+
+    # make temporary files
+    # one is a copy of the conflicted 'current', to iterate with
+    # three are used to hold the different versions of each conflicted hunk
+    # open with 'a' so we can append without worrying about newline characters
+    tmp = tempfile.TemporaryFile(mode='w+')
+    with open(current, 'r') as c: tmp.write(c.read())
+    tmp.seek(0)
+    hunk = [ tempfile.NamedTemporaryFile(mode='a+'), tempfile.NamedTemporaryFile(mode='a+'), tempfile.NamedTemporaryFile(mode='a+') ]
+
+    # process file line by line
+    resolved = zone = index = 0
+
+    for line in tmp:
+
+        # beginning of conflict zone
+        if line.startswith(marker_start):
+            zone = 1
+            for f in hunk:
+                f.truncate(0)
+                f.seek(0)
+
+        # base version of conflict
+        elif line.startswith(marker_base):
+            zone = 2
+
+        # other version of conflict
+        elif line.startswith(marker_other):
+            zone = 3
+
+        # end of conflict zone
+        elif line.startswith(marker_end):
+            zone = 0
+            index += 1
+            fixed, abort = process_hunk(hunk, index, resolved, num_conflicts, current, filename)
+            if fixed: resolved += 1
+            elif abort: break
+
+        # append line to appropriate hunk zone
+        elif zone:
+            hunk[zone-1].write(line)
+
+    # close all temp files (will be automatically deleted)
+    tmp.close()
+    for h in hunk: h.close()
+
+    # print resolution
+    newline = '\n' if interactive else ''
+    col = color.success if resolved == num_conflicts else color.warning if resolved > 0 else color.error
+    print(col + color.bold + newline + 'Resolved %d of %d conflicts in %s' % (resolved, num_conflicts, filename) + newline + color.end)
+
+    return resolved
 
 
 
@@ -728,10 +797,7 @@ if len(sys.argv) == 6:
     # the result should be left in the current version (argv[2])
     base, current, other, marker_len, filename = sys.argv[1:]
     marker_len = int(marker_len)
-    marker_start = '<' * marker_len
-    marker_base = '|' * marker_len
-    marker_other = '=' * marker_len
-    marker_end = '>' * marker_len
+    set_markers(marker_len)
 
     # run git merge on the files using diff3 (result is written to 'current')
     # the number of conflicts is encoded in the exit status of the git-merge-file command
@@ -759,10 +825,7 @@ elif len(sys.argv) >= 2 and os.path.isfile(sys.argv[1]):
     if len(sys.argv) > 3:
         print('Warning: ignoring extra arguments (%s).' % (', '.join(sys.argv[3:])))
 
-    marker_start = '<' * marker_len
-    marker_base = '|' * marker_len
-    marker_other = '=' * marker_len
-    marker_end = '>' * marker_len
+    set_markers(marker_len)
 
     # count the conflicts in the file
     try:
@@ -800,57 +863,8 @@ USE_COLORED_DIFF = (diff_exit_code == 0)
 if interactive:
     print(color.welcome + '\ngit-hires-merge v1.0\n' + color.end)
 
-# make temporary files
-# one is a copy of the conflicted 'current', to iterate with
-# three are used to hold the different versions of each conflicted hunk
-# open with 'a' so we can append without worrying about newline characters
-tmp = tempfile.TemporaryFile(mode='w+')
-with open(current, 'r') as c: tmp.write(c.read())
-tmp.seek(0)
-hunk = [ tempfile.NamedTemporaryFile(mode='a+'), tempfile.NamedTemporaryFile(mode='a+'), tempfile.NamedTemporaryFile(mode='a+') ]
-
-# process file line by line
-resolved = zone = index = 0
-
-for line in tmp:
-
-    # beginning of conflict zone
-    if line.startswith(marker_start):
-        zone = 1
-        for f in hunk: 
-            f.truncate(0)
-            f.seek(0)
-
-    # base version of conflict
-    elif line.startswith(marker_base):
-        zone = 2
-
-    # other version of conflict
-    elif line.startswith(marker_other):
-        zone = 3
-
-    # end of conflict zone
-    elif line.startswith(marker_end):
-        zone = 0
-        index += 1
-        fixed, abort = process_hunk(hunk, index, resolved, num_conflicts)
-        if fixed: resolved += 1
-        elif abort: break
-
-    # append line to appropriate hunk zone
-    elif zone:
-        hunk[zone-1].write(line)
-
-
-# close all temp files (will be automatically deleted)
-tmp.close()
-for h in hunk: h.close()
-
-# print resolution
-newline = '\n' if interactive else ''
-col = color.success if resolved == num_conflicts else color.warning if resolved > 0 else color.error
-print(col + color.bold + newline + 'Resolved %d of %d conflicts in %s' % (resolved, num_conflicts, filename) + newline + color.end)
+# process the file
+resolved = process_file(current, filename, num_conflicts)
 
 # only exit with success if all conflicts were resolved
 sys.exit(0 if resolved == num_conflicts else 1)
-
