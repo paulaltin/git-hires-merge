@@ -38,7 +38,7 @@ exec $PYTHON "$0" "$@"
 " """
 
 # The rest of the file is run by the Python interpreter.
-import os, sys, re, tempfile
+import os, sys, re, tempfile, argparse
 from subprocess import call
 from shutil import copyfile
 from builtins import input
@@ -804,28 +804,23 @@ if len(sys.argv) == 6:
     status = os.system('git merge-file --diff3 --marker-size=%d -L "Current version" -L "Base version" -L "Other version" %s %s %s' % (marker_len, current, base, other))
     num_conflicts = get_exit_status(status)
 
-# invoked manually on a single file
-elif len(sys.argv) >= 2 and os.path.isfile(sys.argv[1]):
+# invoked manually
+else:
 
-    # first argument is path to file
-    current = sys.argv[1]
-    filename = current
+    parser = argparse.ArgumentParser(prog='git-hires-merge',
+        description='Resolve non-overlapping conflicts on individual or adjacent lines.',
+        epilog='Conflicts must have been generated using the diff3 conflictstyle (see README).')
+    parser.add_argument('file', help='path to a conflicted file')
+    parser.add_argument('-m', '--marker-size', type=int, default=7, metavar='N',
+        help='number of characters used in conflict markers (default 7)')
+    args = parser.parse_args()
 
-    # optional second argument for conflict marker size (default is 7 for <<<<<<<)
-    marker_len = 7
-    try:
-        marker_len = int(sys.argv[2])
-    except ValueError:
-        print('Error: unable to read conflict marker size from argument "%s".' % (sys.argv[2]))
+    current = filename = args.file
+    set_markers(args.marker_size)
+
+    if not os.path.isfile(current):
+        print(color.bold + color.error + 'Error: "%s" is not a file.' % current + color.end)
         sys.exit(1)
-    except IndexError:
-        pass
-
-    # extra arguments are ignored
-    if len(sys.argv) > 3:
-        print('Warning: ignoring extra arguments (%s).' % (', '.join(sys.argv[3:])))
-
-    set_markers(marker_len)
 
     # count the conflicts in the file
     try:
@@ -838,14 +833,6 @@ elif len(sys.argv) >= 2 and os.path.isfile(sys.argv[1]):
     if num_conflicts is None:
         print(color.bold + color.error + 'Badly formatted conflicts found in %s. Possibly you need to change your conflictstyle to diff3?' % current + color.end)
         sys.exit(1)
-
-# otherwise show help text
-else:
-
-    print("usage: git-hires-merge <file> [conflict-marker-size]\n"
-          "    <file>: path to file with conflicts (must be generated using diff3 style, see README)\n"
-          "    [conflict-marker-size] (optional): number of characters used in conflict markers (default 7)")
-    sys.exit(1)
 
 
 # sometimes (e.g. during interactive rebase) this script is called even though

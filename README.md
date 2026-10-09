@@ -51,10 +51,10 @@ If you have set up `git-hires-merge` as a custom merge driver (see Installation)
 To invoke `git-hires-merge` manually on a conflicted file, just type:
 
 ```
-    git-hires-merge /path/to/file
+    git-hires-merge [-m N] /path/to/file
 ```
 
-The conflicted file must have been generated using the `diff3` conflictstyle (see note below), and with the current conflict marker size setting (see gitattributes documentation).
+The conflicted file must have been generated using the `diff3` conflictstyle (see note below). If your conflict markers are not the default 7 characters long (see the `conflict-marker-size` attribute in the gitattributes documentation), pass the size with `-m N` or `--marker-size N`.
 
 
 Features
