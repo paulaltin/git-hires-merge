@@ -21,7 +21,8 @@
 #
 #     * merge=git-hires-merge
 #
-# Alternatively, run this script on a conflicted file using 'git-hires-merge /path/to/file'
+# Alternatively, run this script manually using 'git-hires-merge [<pathspec>...]'. With no arguments, it runs
+# on the sole unmerged file in the repository. With pathspecs, it runs on all unmerged files that match them.
 #
 
 
@@ -38,8 +39,8 @@ exec $PYTHON "$0" "$@"
 " """
 
 # The rest of the file is run by the Python interpreter.
-import os, sys, re, tempfile
-from subprocess import call
+import os, sys, re, tempfile, argparse
+from subprocess import call, check_output, CalledProcessError
 from shutil import copyfile
 from builtins import input
 
@@ -460,7 +461,8 @@ def combine_colors(lines1, lines2, color1, color2, color_both):
 ### MERGING ###
 ###############
 
-def process_hunk(hunk, index, resolved, num_conflicts):
+# current is the path to the file containing the conflicts, filename is the name shown to the user
+def process_hunk(hunk, index, resolved, num_conflicts, current, filename):
 
     first_run = True
     fixed = abort = False
@@ -692,85 +694,245 @@ def manual_merge_hunk(hunk):
 
 
 
-############
-### MAIN ###
-############
+#############
+### FILES ###
+#############
 
-# invoked by git
-if len(sys.argv) == 6:
-
-    # arguments passed in by git:
-    # [1] name of temp file containing base version of file
-    # [2] name of temp file containing current version of file
-    # [3] name of temp file containing other version of file
-    # [4] length of conflict markers (default is 7 for <<<<<<<)
-    # [5] name of conflicted file
-    # the result should be left in the current version (argv[2])
-    base, current, other, marker_len, filename = sys.argv[1:]
-    marker_len = int(marker_len)
+# set the conflict markers for the given marker size (default is 7 for <<<<<<<)
+def set_markers(marker_len):
+    global marker_start, marker_base, marker_other, marker_end
     marker_start = '<' * marker_len
     marker_base = '|' * marker_len
     marker_other = '=' * marker_len
     marker_end = '>' * marker_len
+
+
+# count the conflicts in a file by counting its conflict markers
+# returns None if the numbers of each kind of marker don't match, in which case the conflicts
+#   were probably not generated using diff3 and we can't resolve them without the base version
+def count_conflicts(path):
+    markers = [marker_start, marker_base, marker_other, marker_end]
+    counts = [0, 0, 0, 0]
+    with open(path, 'r') as f:
+        for line in f:
+            for i, marker in enumerate(markers):
+                if line.startswith(marker):
+                    counts[i] += 1
+                    break
+    return counts[0] if counts.count(counts[0]) == len(counts) else None
+
+
+# get the unmerged paths in the index which match the given pathspecs
+# paths are relative to the current directory, in index order, without duplicates
+# returns None if we are not inside a git repository
+def unmerged_paths(pathspecs):
+    with open(os.devnull, 'w') as devnull:
+        try:
+            out = check_output(['git', 'ls-files', '--unmerged', '-z', '--'] + list(pathspecs), stderr=devnull)
+        except (CalledProcessError, OSError):
+            return None
+    if not isinstance(out, str):
+        out = out.decode(sys.getfilesystemencoding() or 'utf-8', 'surrogateescape')
+    paths = []
+    for entry in out.split('\0'):
+        # each entry looks like '<mode> <object> <stage>\t<path>'
+        if not entry: continue
+        path = entry.split('\t', 1)[1]
+        if path not in paths: paths.append(path)
+    return paths
+
+
+# work out which files to process from the pathspecs given on the command line
+# inside a git repository, the pathspecs select unmerged files, like they do for 'git checkout --conflict'
+#   with no pathspecs, the sole unmerged file in the repository is selected
+#   an argument which names an existing file is accepted even if that file is not unmerged
+# outside a git repository, the arguments are plain file paths
+# returns the list of files and the number of errors (e.g. pathspecs which matched nothing)
+# exits with an error message if no files can be found
+def find_files(pathspecs):
+
+    errors = 0
+
+    unmerged = unmerged_paths(pathspecs or [':/'])
+
+    # not inside a git repository
+    if unmerged is None:
+        if not pathspecs:
+            print(color.bold + color.error + 'Error: not inside a git repository, so a file to process must be given.' + color.end)
+            sys.exit(1)
+        files = []
+        for p in pathspecs:
+            if os.path.isfile(p):
+                files.append(p)
+            else:
+                print(color.bold + color.error + 'Error: "%s" is not a file, skipping.' % p + color.end)
+                errors += 1
+
+    # no pathspecs: default to the sole unmerged file
+    elif not pathspecs:
+        if len(unmerged) == 0:
+            print(color.bold + color.error + 'Error: there are no unmerged files in this repository.' + color.end)
+            sys.exit(1)
+        elif len(unmerged) > 1:
+            print(color.bold + color.error + 'Error: there are %d unmerged files in this repository, specify which to process:' % len(unmerged) + color.end)
+            for p in unmerged: print('    ' + p)
+            print('(use "git-hires-merge ." to process all unmerged files below the current directory)')
+            sys.exit(1)
+        files = unmerged
+
+    # pathspecs given: use the unmerged files matching them
+    # also accept any argument which names an existing file, e.g. a conflicted file which is not in the index
+    else:
+        files = list(unmerged)
+        found = set(os.path.realpath(p) for p in files)
+        for p in pathspecs:
+            if os.path.realpath(p) in found:
+                continue
+            elif os.path.isfile(p):
+                files.append(p)
+                found.add(os.path.realpath(p))
+            elif len(unmerged_paths([p]) or []) == 0:
+                print(color.bold + color.error + 'Error: pathspec "%s" did not match any unmerged files.' % p + color.end)
+                errors += 1
+
+    if not files:
+        print(color.bold + color.error + 'Error: no files to process.' + color.end)
+        sys.exit(1)
+
+    return files, errors
+
+
+# resolve the conflicts in one file
+# current is the path to the file containing the conflicts, which is modified in place
+# filename is the name shown to the user (differs from current when git invokes us as a merge driver)
+# returns the number of conflicts which were resolved
+def process_file(current, filename, num_conflicts):
+
+    # make temporary files
+    # one is a copy of the conflicted 'current', to iterate with
+    # three are used to hold the different versions of each conflicted hunk
+    # open with 'a' so we can append without worrying about newline characters
+    tmp = tempfile.TemporaryFile(mode='w+')
+    with open(current, 'r') as c: tmp.write(c.read())
+    tmp.seek(0)
+    hunk = [ tempfile.NamedTemporaryFile(mode='a+'), tempfile.NamedTemporaryFile(mode='a+'), tempfile.NamedTemporaryFile(mode='a+') ]
+
+    # process file line by line
+    resolved = zone = index = 0
+
+    for line in tmp:
+
+        # beginning of conflict zone
+        if line.startswith(marker_start):
+            zone = 1
+            for f in hunk:
+                f.truncate(0)
+                f.seek(0)
+
+        # base version of conflict
+        elif line.startswith(marker_base):
+            zone = 2
+
+        # other version of conflict
+        elif line.startswith(marker_other):
+            zone = 3
+
+        # end of conflict zone
+        elif line.startswith(marker_end):
+            zone = 0
+            index += 1
+            fixed, abort = process_hunk(hunk, index, resolved, num_conflicts, current, filename)
+            if fixed: resolved += 1
+            elif abort: break
+
+        # append line to appropriate hunk zone
+        elif zone:
+            hunk[zone-1].write(line)
+
+    # close all temp files (will be automatically deleted)
+    tmp.close()
+    for h in hunk: h.close()
+
+    # print resolution
+    newline = '\n' if interactive else ''
+    col = color.success if resolved == num_conflicts else color.warning if resolved > 0 else color.error
+    print(col + color.bold + newline + 'Resolved %d of %d conflicts in %s' % (resolved, num_conflicts, filename) + newline + color.end)
+
+    return resolved
+
+
+
+############
+### MAIN ###
+############
+
+# list of (current, filename, num_conflicts) to process, and number of errors found while looking for them
+files = []
+errors = 0
+
+# invoked by git as a merge driver
+# arguments passed in by git:
+# [1] name of temp file containing base version of file
+# [2] name of temp file containing current version of file
+# [3] name of temp file containing other version of file
+# [4] length of conflict markers (default is 7 for <<<<<<<)
+# [5] name of conflicted file
+# the result should be left in the current version (argv[2])
+if len(sys.argv) == 6 and sys.argv[4].isdigit() and all(os.path.isfile(a) for a in sys.argv[1:4]):
+
+    base, current, other, marker_len, filename = sys.argv[1:]
+    marker_len = int(marker_len)
+    set_markers(marker_len)
 
     # run git merge on the files using diff3 (result is written to 'current')
     # the number of conflicts is encoded in the exit status of the git-merge-file command
     status = os.system('git merge-file --diff3 --marker-size=%d -L "Current version" -L "Base version" -L "Other version" %s %s %s' % (marker_len, current, base, other))
     num_conflicts = get_exit_status(status)
 
-# invoked manually on a single file
-elif len(sys.argv) >= 2 and os.path.isfile(sys.argv[1]):
+    # sometimes (e.g. during interactive rebase) this script is called even though
+    # there are no conflicts - in that case just exit successfully here
+    if num_conflicts == 0:
+        sys.exit(0)
 
-    # first argument is path to file
-    current = sys.argv[1]
-    filename = current
+    files.append((current, filename, num_conflicts))
 
-    # optional second argument for conflict marker size (default is 7 for <<<<<<<)
-    marker_len = 7
-    try:
-        marker_len = int(sys.argv[2])
-    except ValueError:
-        print('Error: unable to read conflict marker size from argument "%s".' % (sys.argv[2]))
-        sys.exit(1)
-    except IndexError:
-        pass
-
-    # extra arguments are ignored
-    if len(sys.argv) > 3:
-        print('Warning: ignoring extra arguments (%s).' % (', '.join(sys.argv[3:])))
-
-    marker_start = '<' * marker_len
-    marker_base = '|' * marker_len
-    marker_other = '=' * marker_len
-    marker_end = '>' * marker_len
-
-    # use grep to find number of conflicts in the file
-    num_start = int(os.popen('grep -c "^%s" "%s"' % (marker_start, current)).read())
-    num_base = int(os.popen('grep -c "^%s" "%s"' % (marker_base, current)).read())
-    num_other = int(os.popen('grep -c "^%s" "%s"' % (marker_other, current)).read())
-    num_end = int(os.popen('grep -c "^%s" "%s"' % (marker_end, current)).read())
-
-    # check that the number of conflict markers match
-    # if they don't, probably the merge wasn't generated using diff3, and we can't resolve conflicts without the base version
-    if num_start == num_base == num_other == num_end:
-        num_conflicts = num_start
-    else:
-        print('Badly formatted conflicts found in file. Possibly you need to change your conflictstyle to diff3?')
-        sys.exit(1)
-
-# otherwise show help text
+# invoked manually
 else:
 
-    print("usage: git-hires-merge <file> [conflict-marker-size]\n"
-          "    <file>: path to file with conflicts (must be generated using diff3 style, see README)\n"
-          "    [conflict-marker-size] (optional): number of characters used in conflict markers (default 7)")
-    sys.exit(1)
+    parser = argparse.ArgumentParser(prog='git-hires-merge',
+        description='Resolve non-overlapping conflicts on individual or adjacent lines.',
+        epilog='Conflicts must have been generated using the diff3 conflictstyle (see README). '
+               'Inside a git repository, the pathspecs select unmerged files. With no pathspec, '
+               'the sole unmerged file in the repository is processed.')
+    parser.add_argument('pathspec', nargs='*',
+        help='unmerged files to process, e.g. "." or "*.cfg" (or a path to a conflicted file)')
+    parser.add_argument('-m', '--marker-size', type=int, default=7, metavar='N',
+        help='number of characters used in conflict markers (default 7)')
+    args = parser.parse_args()
 
+    set_markers(args.marker_size)
 
-# sometimes (e.g. during interactive rebase) this script is called even though
-# there are no conflicts - in that case just exit successfully here
-if num_conflicts == 0:
-    sys.exit(0)
+    paths, errors = find_files(args.pathspec)
+    for path in paths:
+        try:
+            num_conflicts = count_conflicts(path)
+        except (IOError, UnicodeDecodeError) as e:
+            print(color.bold + color.error + 'Error: could not read %s (%s), skipping.' % (path, e) + color.end)
+            errors += 1
+            continue
+        # if the numbers of markers don't match, probably the merge wasn't generated using diff3
+        if num_conflicts is None:
+            print(color.bold + color.error + 'Badly formatted conflicts found in %s. Possibly you need to change your conflictstyle to diff3?' % path + color.end)
+            errors += 1
+        elif num_conflicts == 0:
+            print(color.bold + color.info + 'No conflicts found in %s' % path + color.end)
+        else:
+            files.append((path, path, num_conflicts))
+
+    # nothing to do
+    if not files:
+        sys.exit(1 if errors else 0)
+
 
 # colored diffs currently require GNU-based diff
 # BSD-based diff bundled with macOS >= 13 don't support format options
@@ -782,57 +944,17 @@ USE_COLORED_DIFF = (diff_exit_code == 0)
 if interactive:
     print(color.welcome + '\ngit-hires-merge v1.0\n' + color.end)
 
-# make temporary files
-# one is a copy of the conflicted 'current', to iterate with
-# three are used to hold the different versions of each conflicted hunk
-# open with 'a' so we can append without worrying about newline characters
-tmp = tempfile.TemporaryFile(mode='w+')
-with open(current, 'r') as c: tmp.write(c.read())
-tmp.seek(0)
-hunk = [ tempfile.NamedTemporaryFile(mode='a+'), tempfile.NamedTemporaryFile(mode='a+'), tempfile.NamedTemporaryFile(mode='a+') ]
+# process each file in turn
+total_resolved = total_conflicts = 0
+for current, filename, num_conflicts in files:
+    total_resolved += process_file(current, filename, num_conflicts)
+    total_conflicts += num_conflicts
 
-# process file line by line
-resolved = zone = index = 0
+# print overall resolution if there was more than one file
+if len(files) > 1:
+    newline = '\n' if interactive else ''
+    col = color.success if total_resolved == total_conflicts else color.warning if total_resolved > 0 else color.error
+    print(col + color.bold + newline + 'Resolved %d of %d conflicts in %d files' % (total_resolved, total_conflicts, len(files)) + newline + color.end)
 
-for line in tmp:
-
-    # beginning of conflict zone
-    if line.startswith(marker_start):
-        zone = 1
-        for f in hunk: 
-            f.truncate(0)
-            f.seek(0)
-
-    # base version of conflict
-    elif line.startswith(marker_base):
-        zone = 2
-
-    # other version of conflict
-    elif line.startswith(marker_other):
-        zone = 3
-
-    # end of conflict zone
-    elif line.startswith(marker_end):
-        zone = 0
-        index += 1
-        fixed, abort = process_hunk(hunk, index, resolved, num_conflicts)
-        if fixed: resolved += 1
-        elif abort: break
-
-    # append line to appropriate hunk zone
-    elif zone:
-        hunk[zone-1].write(line)
-
-
-# close all temp files (will be automatically deleted)
-tmp.close()
-for h in hunk: h.close()
-
-# print resolution
-newline = '\n' if interactive else ''
-col = color.success if resolved == num_conflicts else color.warning if resolved > 0 else color.error
-print(col + color.bold + newline + 'Resolved %d of %d conflicts in %s' % (resolved, num_conflicts, filename) + newline + color.end)
-
-# only exit with success if all conflicts were resolved
-sys.exit(0 if resolved == num_conflicts else 1)
-
+# only exit with success if all conflicts were resolved and no errors occurred
+sys.exit(0 if total_resolved == total_conflicts and errors == 0 else 1)
