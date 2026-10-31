@@ -48,13 +48,24 @@ Usage
 
 If you have set up `git-hires-merge` as a custom merge driver (see Installation), then you don't need to do anything - it will run automatically when a conflict happens during a merge or rebase.
 
-To invoke `git-hires-merge` manually on a conflicted file, just type:
+To invoke `git-hires-merge` manually, just type:
 
 ```
-    git-hires-merge /path/to/file
+    git hires-merge [<pathspec>...]
 ```
 
-The conflicted file must have been generated using the `diff3` conflictstyle (see note below), and with the current conflict marker size setting (see gitattributes documentation).
+Inside a Git repository, the pathspecs select unmerged files, in the same way as for `git checkout --conflict`. Some examples:
+
+```
+    git hires-merge                 # run on the sole unmerged file in the repository
+    git hires-merge .               # run on all unmerged files below the current directory
+    git hires-merge -- '*.cfg'      # run on all unmerged files whose name ends in .cfg
+    git hires-merge path/to/file    # run on one unmerged file
+```
+
+With no pathspec, `git-hires-merge` runs on the sole unmerged file in the repository. If there is more than one, it lists them and stops. You can also give the path to a conflicted file directly, for example outside a Git repository.
+
+The conflicted files must have been generated using the `diff3` conflictstyle (see note below). If your conflict markers are not the default 7 characters long (see the `conflict-marker-size` attribute in the gitattributes documentation), pass the size with `-m`/`--marker-size`.
 
 
 Features
@@ -62,6 +73,7 @@ Features
 - Interactive resolution of conflicts on adjacent lines
 - Interactive resolution of non-overlapping conflicts on individual lines
 - Can be used automatically during merging/rebasing operations, or manually from the command line
+- Accepts Git pathspecs to resolve conflicts in several files at once
 - Word-level diff highlighting shows exactly what has changed on each branch
 - Option to resolve manually using the default Git editor
 - Environment variables to control which hunks are unlikely to be resolvable and should be skipped
